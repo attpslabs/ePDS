@@ -7,10 +7,17 @@
  * independently and preserves ePDS extension fields (brand_color,
  * epds_handle_mode, epds_skip_consent_on_signup, etc.).
  *
+ * Shared between pds-core (CSS injection middleware) and auth-service
+ * (login/consent page branding).
+ *
  * Results are cached for 10 minutes to avoid repeated fetches.
  */
 
 import type { HandleMode } from './handle.js'
+
+export interface ClientBranding {
+  css?: string
+}
 
 export interface ClientMetadata {
   client_name?: string
@@ -22,6 +29,7 @@ export interface ClientMetadata {
   email_subject_template?: string
   brand_color?: string
   background_color?: string
+  branding?: ClientBranding
   /**
    * ePDS extension — declares the default handle assignment mode for new users.
    * Accepted values: 'random' | 'picker' | 'picker-with-random'.
@@ -116,6 +124,30 @@ function extractDomain(urlStr: string): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Escape CSS for safe embedding in an HTML <style> tag.
+ * Replaces `</style>` (case-insensitive) with `\u003c/style>` to prevent
+ * premature tag closure / HTML injection. Matches the upstream pattern in
+ * oauth-provider/src/lib/html/escapers.ts.
+ */
+export function escapeCss(css: string): string {
+  return css.replace(/<\/style>/gi, '\\u003c/style>')
+}
+
+/**
+ * Returns escaped CSS for injection if the client is trusted, or null.
+ */
+export function getClientCss(
+  clientId: string,
+  metadata: ClientMetadata,
+  trustedClients: string[],
+): string | null {
+  if (!trustedClients.includes(clientId)) return null
+  const raw = metadata.branding?.css
+  if (!raw) return null
+  return escapeCss(raw)
 }
 
 // Cleanup expired cache entries periodically
