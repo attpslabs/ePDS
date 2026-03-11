@@ -28,7 +28,12 @@ export function createAuthService(config: AuthServiceConfig): {
 
   // Mount better-auth BEFORE express.json() so it can parse its own request bodies.
   // All better-auth endpoints live under /api/auth/*.
-  const betterAuthInstance = createBetterAuth(ctx.emailSender, ctx.db)
+  const betterAuthInstance = createBetterAuth(
+    ctx.emailSender,
+    ctx.db,
+    config.otpLength,
+    config.otpCharset,
+  )
   app.all('/api/auth/*', toNodeHandler(betterAuthInstance))
 
   // Middleware
@@ -75,8 +80,7 @@ export function createAuthService(config: AuthServiceConfig): {
   app.use(createLoginPageRouter(ctx))
   app.use(createConsentRouter(ctx))
   app.use(createRecoveryRouter(ctx, betterAuthInstance))
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  app.use((createAccountLoginRouter as any)(betterAuthInstance, ctx))
+  app.use(createAccountLoginRouter(betterAuthInstance, ctx))
   app.use(createAccountSettingsRouter(ctx, betterAuthInstance))
   app.use(createCompleteRouter(ctx, betterAuthInstance))
   app.use(createChooseHandleRouter(ctx, betterAuthInstance))
@@ -134,6 +138,9 @@ async function main() {
     },
     dbLocation: process.env.DB_LOCATION || './data/epds.sqlite',
     otpLength: parseInt(process.env.OTP_LENGTH || '8', 10),
+    otpCharset: (process.env.OTP_CHARSET || 'numeric') as
+      | 'numeric'
+      | 'alphanumeric',
   }
 
   if (
@@ -146,7 +153,19 @@ async function main() {
     )
   }
 
-  await runBetterAuthMigrations(config.dbLocation, config.hostname)
+  const validCharsets = ['numeric', 'alphanumeric']
+  if (!validCharsets.includes(config.otpCharset)) {
+    throw new Error(
+      `Invalid OTP_CHARSET: must be 'numeric' or 'alphanumeric', got "${process.env.OTP_CHARSET}"`,
+    )
+  }
+
+  await runBetterAuthMigrations(
+    config.dbLocation,
+    config.hostname,
+    config.otpLength,
+    config.otpCharset,
+  )
 
   const { app, ctx } = createAuthService(config)
 

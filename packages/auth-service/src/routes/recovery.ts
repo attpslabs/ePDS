@@ -29,6 +29,8 @@ export function createRecoveryRouter(
   auth: any,
 ): Router {
   const router = Router()
+  const otpLength = ctx.config.otpLength
+  const otpCharset = ctx.config.otpCharset
 
   router.get('/auth/recover', (req: Request, res: Response) => {
     const requestUri = req.query.request_uri as string | undefined
@@ -108,6 +110,8 @@ export function createRecoveryRouter(
             email,
             csrfToken: res.locals.csrfToken,
             requestUri,
+            otpLength,
+            otpCharset,
           }),
         )
       } catch (err) {
@@ -118,6 +122,8 @@ export function createRecoveryRouter(
             csrfToken: res.locals.csrfToken,
             requestUri,
             error: 'Failed to send code. Please try again.',
+            otpLength,
+            otpCharset,
           }),
         )
       }
@@ -128,6 +134,8 @@ export function createRecoveryRouter(
           email,
           csrfToken: res.locals.csrfToken,
           requestUri,
+          otpLength,
+          otpCharset,
         }),
       )
     }
@@ -182,6 +190,8 @@ export function createRecoveryRouter(
           csrfToken: res.locals.csrfToken,
           requestUri,
           error: errMsg,
+          otpLength,
+          otpCharset,
         }),
       )
     }
@@ -229,10 +239,13 @@ function renderOtpForm(opts: {
   email: string
   csrfToken: string
   requestUri: string
+  otpLength: number
+  otpCharset: 'numeric' | 'alphanumeric'
   error?: string
 }): string {
   const maskedEmail = maskEmail(opts.email)
   const encodedUri = encodeURIComponent(opts.requestUri)
+  const article = /^[aeiou]/i.test(opts.otpLength.toString()) ? 'an' : 'a'
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -245,7 +258,7 @@ function renderOtpForm(opts: {
 <body>
   <div class="container">
     <h1>Enter recovery code</h1>
-    <p class="subtitle">If a backup email matches, we sent an 8-digit code to <strong>${escapeHtml(maskedEmail)}</strong></p>
+    <p class="subtitle">If a backup email matches, we sent ${article} ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
     ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
     <form method="POST" action="/auth/recover/verify">
       <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
@@ -253,8 +266,10 @@ function renderOtpForm(opts: {
       <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
       <div class="field">
         <input type="text" id="code" name="code" required autofocus
-               maxlength="8" pattern="[0-9]{8}" inputmode="numeric" autocomplete="one-time-code"
-               placeholder="00000000" class="otp-input">
+               maxlength="${opts.otpLength}" pattern="${opts.otpCharset === 'alphanumeric' ? `[A-Za-z0-9]{${opts.otpLength}}` : `[0-9]{${opts.otpLength}}`}" inputmode="${opts.otpCharset === 'alphanumeric' ? 'text' : 'numeric'}" autocomplete="one-time-code"
+               ${opts.otpCharset === 'alphanumeric' ? 'autocapitalize="characters"' : 'autocapitalize="off"'}
+               placeholder="${opts.otpCharset === 'alphanumeric' ? 'X'.repeat(opts.otpLength) : '0'.repeat(opts.otpLength)}" class="otp-input"
+               style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
       </div>
       <button type="submit" class="btn-primary">Verify</button>
     </form>
@@ -288,7 +303,7 @@ const CSS = `
   .field label { display: block; font-size: 14px; font-weight: 500; color: #333; margin-bottom: 6px; }
   .field input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; }
   .field input:focus { border-color: #0f1828; }
-  .otp-input { font-size: 28px !important; text-align: center; letter-spacing: 8px; font-family: 'SF Mono', Menlo, Consolas, monospace !important; padding: 14px !important; }
+  .otp-input { font-size: 28px !important; text-align: center; font-family: 'SF Mono', Menlo, Consolas, monospace !important; padding: 14px !important; }
   .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
   .btn-primary:hover { background: #1a2a40; }
   .btn-secondary { display: inline-block; margin-top: 12px; color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }

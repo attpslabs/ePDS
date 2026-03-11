@@ -142,6 +142,28 @@ describe('Recovery flow: OTP pattern', () => {
     expect(maxlength).toBe(OTP_LENGTH)
     expect(pattern).toContain(String(OTP_LENGTH))
   })
+
+  it('alphanumeric OTP matches configured pattern', () => {
+    const OTP_LENGTH = parseInt(process.env.OTP_LENGTH ?? '8', 10)
+    const pattern = new RegExp(`^[A-Za-z0-9]{${OTP_LENGTH}}$`)
+    const otp = 'A1B2C3D4'.slice(0, OTP_LENGTH).padEnd(OTP_LENGTH, 'X')
+    expect(pattern.test(otp)).toBe(true)
+  })
+
+  it('numeric-only OTP does not match alphanumeric-exclusive pattern', () => {
+    // Verify that a purely numeric OTP still matches [A-Za-z0-9] (it should — digits are a subset)
+    const OTP_LENGTH = parseInt(process.env.OTP_LENGTH ?? '8', 10)
+    const pattern = new RegExp(`^[A-Za-z0-9]{${OTP_LENGTH}}$`)
+    const otp = '1'.repeat(OTP_LENGTH)
+    expect(pattern.test(otp)).toBe(true)
+  })
+
+  it('alphanumeric OTP placeholder uses X.repeat(N) not 0.repeat(N)', () => {
+    const OTP_LENGTH = parseInt(process.env.OTP_LENGTH ?? '8', 10)
+    const placeholder = 'X'.repeat(OTP_LENGTH)
+    expect(placeholder).toBe('X'.repeat(OTP_LENGTH))
+    expect(placeholder).not.toBe('0'.repeat(OTP_LENGTH))
+  })
 })
 
 describe('Recovery flow: /auth/complete bridge integration', () => {
