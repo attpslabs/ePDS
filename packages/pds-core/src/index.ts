@@ -19,10 +19,12 @@ dotenv.config()
 import type * as http from 'node:http'
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto'
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
+import { HandleUnavailableError } from '@atproto/oauth-provider'
 import {
   generateRandomHandle,
   createLogger,
   verifyCallback,
+  escapeHtml,
 } from '@certified-app/shared'
 
 const logger = createLogger('pds-core')
@@ -85,7 +87,7 @@ async function main() {
     const approvedStr = req.query.approved as string
     const newAccountStr = req.query.new_account as string
     const handleParam = req.query.handle as string | undefined
-    const callbackVerification = verifyCallback(
+    const signatureValid = verifyCallback(
       {
         request_uri: requestUri,
         email,
@@ -98,7 +100,7 @@ async function main() {
       epdsCallbackSecret,
     )
 
-    if (!callbackVerification.valid) {
+    if (!signatureValid) {
       // Distinguish expired from invalid to help with clock-skew debugging
       const tsNum = parseInt(ts, 10)
       const age = Math.floor(Date.now() / 1000) - tsNum
@@ -113,7 +115,7 @@ async function main() {
     // Extract handle local part from verified callback params (tamper-proof — covered by HMAC).
     // The callback now carries only the local part (e.g. 'alice'); we append our own
     // trusted handleDomain here so there is no possibility of domain mismatch.
-    const chosenHandleLocal = callbackVerification.handle
+    const chosenHandleLocal = handleParam
     const chosenHandle = chosenHandleLocal
       ? `${chosenHandleLocal}.${handleDomain}`
       : undefined
@@ -171,7 +173,26 @@ async function main() {
         const accountData = await provider.accountManager.getAccount(did)
         account = accountData.account
       } else if (chosenHandle) {
-        // User chose a handle — use it directly, no retry loop
+        // User chose a handle — pre-check existence before attempting createAccount.
+        // This avoids treating non-collision errors (datastore failures, invite-code
+        // misconfiguration, etc.) as handle collisions.
+        const existingHandle =
+          await pds.ctx.accountManager.getAccount(chosenHandle)
+        if (existingHandle) {
+          logger.warn(
+            { handle: chosenHandle },
+            'chosen handle already taken (pre-check)',
+          )
+          res.redirect(
+            303,
+            `https://${authHostname}/auth/choose-handle?error=handle_taken`,
+          )
+          return
+        }
+
+        // Handle is free — attempt account creation. Any error here is NOT a
+        // collision (we just confirmed the handle is available), so log as error
+        // and return 500 rather than silently redirecting to handle_taken.
         try {
           account = await provider.accountManager.createAccount(
             deviceId,
@@ -196,15 +217,27 @@ async function main() {
             'Created account with chosen handle',
           )
         } catch (createErr: unknown) {
-          // Handle collision — redirect back to choose-handle page
-          logger.warn(
+          if (createErr instanceof HandleUnavailableError) {
+            // Reserved handle slipped past the pre-check (pre-check only tests DB existence,
+            // not the reserved-subdomain list). Redirect back to handle picker.
+            logger.warn(
+              { handle: chosenHandle },
+              'Handle unavailable during createAccount (reserved or taken)',
+            )
+            res.redirect(
+              303,
+              `https://${authHostname}/auth/choose-handle?error=handle_taken`,
+            )
+            return
+          }
+          logger.error(
             { err: createErr, handle: chosenHandle },
-            'chosen handle collision at createAccount',
+            'createAccount failed',
           )
-          res.redirect(
-            303,
-            `https://${authHostname}/auth/choose-handle?error=handle_taken`,
-          )
+          res
+            .status(500)
+            .type('html')
+            .send(renderError('Account creation failed. Please try again.'))
           return
         }
       } else {
@@ -466,8 +499,43 @@ async function main() {
     try {
       const account = await pds.ctx.accountManager.getAccount(handle)
       res.json({ exists: !!account })
-    } catch {
-      res.json({ exists: false })
+    } catch (err) {
+      logger.error({ err, handle }, 'Failed to check handle availability')
+      res.status(503).json({ error: 'handle_check_failed' })
+    }
+  })
+
+  // Protected internal endpoint for auth service to reset the inactivity timer
+  // on a pending PAR request_uri. Called when the user loads the handle selection
+  // page so the request doesn't expire while they are choosing a handle.
+  // atproto's AUTHORIZATION_INACTIVITY_TIMEOUT is 5 minutes — without this ping,
+  // users who take >5 min on the handle page would get "This request has expired"
+  // inside epds-callback after account creation, leaving the auth flow broken.
+  pds.app.get('/_internal/ping-request', async (req, res) => {
+    if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    const requestUri = ((req.query.request_uri as string) || '').trim()
+    if (!requestUri) {
+      res.status(400).json({ error: 'Missing request_uri' })
+      return
+    }
+    if (!provider) {
+      res.status(503).json({ error: 'OAuth provider not available' })
+      return
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
+      await (provider.requestManager as any).get(requestUri)
+      res.json({ ok: true })
+    } catch (err) {
+      // Request expired or not found — not a server error, just report it
+      logger.debug(
+        { err, requestUri },
+        'ping-request: request_uri expired or not found',
+      )
+      res.status(404).json({ error: 'request_expired' })
     }
   })
 
@@ -574,6 +642,14 @@ async function checkHandleRoute(
       .status(500)
       .json({ error: 'InternalServerError', message: 'Internal Server Error' })
   }
+}
+
+function renderError(message: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Error</title></head>
+<body><p style="color:red;padding:20px">${escapeHtml(message)}</p></body>
+</html>`
 }
 
 main().catch((err: unknown) => {

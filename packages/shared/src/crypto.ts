@@ -82,16 +82,9 @@ export function signCallback(
 
 const CALLBACK_MAX_AGE_SECONDS = 5 * 60 // 5 minutes
 
-export interface VerifyCallbackResult {
-  valid: boolean
-  handle?: string // present only when the callback was signed with a handle
-}
-
 /**
  * Verify a signed epds-callback redirect URL.
- * Returns { valid, handle? } where valid is true only when the signature is
- * valid and the timestamp is fresh. handle is included when the callback was
- * signed with a chosen handle (new account creation flow).
+ * Returns true only when the signature is valid and the timestamp is fresh.
  * Uses timingSafeEqual to avoid timing side-channels.
  */
 export function verifyCallback(
@@ -99,13 +92,13 @@ export function verifyCallback(
   ts: string,
   sig: string,
   secret: string,
-): VerifyCallbackResult {
+): boolean {
   const tsNum = parseInt(ts, 10)
-  if (isNaN(tsNum)) return { valid: false }
+  if (isNaN(tsNum)) return false
 
   const now = Math.floor(Date.now() / 1000)
   const age = now - tsNum
-  if (age < 0 || age > CALLBACK_MAX_AGE_SECONDS) return { valid: false }
+  if (age < 0 || age > CALLBACK_MAX_AGE_SECONDS) return false
 
   const payload = [
     params.request_uri,
@@ -121,14 +114,15 @@ export function verifyCallback(
     .digest('hex')
 
   // Both are hex-encoded HMAC-SHA256 (always 64 chars / 32 bytes).
-  // Guard against wrong-length input to keep timingSafeEqual happy.
-  if (sig.length !== expected.length) return { valid: false }
+  // Normalize and validate sig format before decoding to prevent Buffer.from
+  // truncation on non-hex input, which would cause timingSafeEqual to throw.
+  const normalizedSig = sig.toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(normalizedSig)) return false
   const isValid = crypto.timingSafeEqual(
     Buffer.from(expected, 'hex'),
-    Buffer.from(sig, 'hex'),
+    Buffer.from(normalizedSig, 'hex'),
   )
-  if (!isValid) return { valid: false }
-  return { valid: true, ...(params.handle ? { handle: params.handle } : {}) }
+  return isValid
 }
 
 /**

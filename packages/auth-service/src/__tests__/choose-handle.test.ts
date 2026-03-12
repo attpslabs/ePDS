@@ -1,12 +1,11 @@
 /**
  * Unit tests for the handle selection flow.
  *
- * Tests the exported HANDLE_REGEX and RESERVED_HANDLES constants from
- * choose-handle.ts, covering format validation edge cases and the reserved
- * handle blocklist.
+ * Tests the exported HANDLE_REGEX constant from choose-handle.ts,
+ * covering format validation edge cases.
  */
 import { describe, it, expect } from 'vitest'
-import { HANDLE_REGEX, RESERVED_HANDLES } from '../routes/choose-handle.js'
+import { HANDLE_REGEX } from '../routes/choose-handle.js'
 
 describe('HANDLE_REGEX — valid handles', () => {
   it('accepts a simple lowercase word', () => {
@@ -85,55 +84,5 @@ describe('HANDLE_REGEX — invalid handles', () => {
 
   it('rejects a handle with underscores', () => {
     expect(HANDLE_REGEX.test('my_handle')).toBe(false)
-  })
-})
-
-describe('RESERVED_HANDLES — blocklist', () => {
-  it('includes "admin"', () => {
-    expect(RESERVED_HANDLES.has('admin')).toBe(true)
-  })
-
-  it('includes "root"', () => {
-    expect(RESERVED_HANDLES.has('root')).toBe(true)
-  })
-
-  it('includes "support"', () => {
-    expect(RESERVED_HANDLES.has('support')).toBe(true)
-  })
-
-  it('includes "help"', () => {
-    expect(RESERVED_HANDLES.has('help')).toBe(true)
-  })
-
-  it('includes "abuse"', () => {
-    expect(RESERVED_HANDLES.has('abuse')).toBe(true)
-  })
-
-  it('includes "system"', () => {
-    expect(RESERVED_HANDLES.has('system')).toBe(true)
-  })
-
-  it('includes "moderator"', () => {
-    expect(RESERVED_HANDLES.has('moderator')).toBe(true)
-  })
-
-  it('includes "api"', () => {
-    expect(RESERVED_HANDLES.has('api')).toBe(true)
-  })
-
-  it('includes "auth"', () => {
-    expect(RESERVED_HANDLES.has('auth')).toBe(true)
-  })
-
-  it('includes "security"', () => {
-    expect(RESERVED_HANDLES.has('security')).toBe(true)
-  })
-
-  it('does not block a normal user handle', () => {
-    expect(RESERVED_HANDLES.has('alice')).toBe(false)
-  })
-
-  it('does not block a handle with digits', () => {
-    expect(RESERVED_HANDLES.has('user123')).toBe(false)
   })
 })
