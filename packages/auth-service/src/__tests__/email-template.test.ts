@@ -74,8 +74,7 @@ describe('EmailSender', () => {
 
   describe('sendOtpCode (client template)', () => {
     it('uses client template when available', async () => {
-      // Mock resolveClientMetadata to return a template URI
-      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      const mockFetch = vi.fn().mockImplementation((url: string) => {
         if (url === 'https://app.example/client-metadata.json') {
           return Promise.resolve({
             ok: true,
@@ -99,22 +98,40 @@ describe('EmailSender', () => {
         }
         return Promise.resolve({ ok: false })
       }) as unknown as typeof fetch
+      globalThis.fetch = mockFetch
 
       const sender = makeSender()
-      await expect(
-        sender.sendOtpCode({
-          to: 'branded@test.com',
-          code: '99999999',
-          clientAppName: 'Fallback Name',
-          clientId: 'https://app.example/client-metadata.json',
-          pdsName: 'Test PDS',
-          pdsDomain: 'pds.example',
-        }),
-      ).resolves.toBeUndefined()
+      // Spy on the transporter to capture the sent email
+      const sendMailSpy = vi.spyOn(sender['transporter'], 'sendMail')
+
+      await sender.sendOtpCode({
+        to: 'branded@test.com',
+        code: '99999999',
+        clientAppName: 'Fallback Name',
+        clientId: 'https://app.example/client-metadata.json',
+        pdsName: 'Test PDS',
+        pdsDomain: 'pds.example',
+      })
+
+      // Verify the template URL was fetched
+      const fetchedUrls = mockFetch.mock.calls.map((call: unknown[]) => call[0])
+      expect(fetchedUrls).toContain('https://app.example/email-template.html')
+
+      // Verify the sent email uses the branded template content
+      expect(sendMailSpy).toHaveBeenCalledOnce()
+      const mailOpts = sendMailSpy.mock.calls[0][0] as {
+        html: string
+        subject: string
+        from: string
+      }
+      expect(mailOpts.html).toContain('Your code is 99999999 for Branded App')
+      expect(mailOpts.subject).toContain('Branded App')
+      // From name should use the client name, not the default
+      expect(mailOpts.from).toContain('Branded App')
     })
 
     it('falls back to default when client template fetch fails', async () => {
-      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      const mockFetch = vi.fn().mockImplementation((url: string) => {
         if (url.includes('client-metadata.json')) {
           return Promise.resolve({
             ok: true,
@@ -128,18 +145,39 @@ describe('EmailSender', () => {
         // Template fetch fails
         return Promise.reject(new Error('Network error'))
       }) as unknown as typeof fetch
+      globalThis.fetch = mockFetch
 
       const sender = makeSender()
-      await expect(
-        sender.sendOtpCode({
-          to: 'fallback@test.com',
-          code: '44444444',
-          clientAppName: 'Fallback App',
-          clientId: 'https://failing.app/client-metadata.json',
-          pdsName: 'Test PDS',
-          pdsDomain: 'pds.example',
-        }),
-      ).resolves.toBeUndefined()
+      const sendMailSpy = vi.spyOn(sender['transporter'], 'sendMail')
+
+      await sender.sendOtpCode({
+        to: 'fallback@test.com',
+        code: '44444444',
+        clientAppName: 'Fallback App',
+        clientId: 'https://failing.app/client-metadata.json',
+        pdsName: 'Test PDS',
+        pdsDomain: 'pds.example',
+      })
+
+      // Verify the broken template URL was attempted
+      const fetchedUrls = mockFetch.mock.calls.map((call: unknown[]) => call[0])
+      expect(fetchedUrls).toContain('https://app.example/broken-template.html')
+
+      // Verify fallback to default template (sign-in, not branded)
+      expect(sendMailSpy).toHaveBeenCalledOnce()
+      const mailOpts = sendMailSpy.mock.calls[0][0] as {
+        html: string
+        subject: string
+        from: string
+      }
+      // Default template uses pdsName in subject, not client name
+      expect(mailOpts.subject).toContain('Test PDS')
+      // Default template contains the sign-in code block
+      expect(mailOpts.html).toContain('44444444')
+      // Should NOT contain the broken template content
+      expect(mailOpts.html).not.toContain('broken-template')
+      // From name should be the default config, not the client name
+      expect(mailOpts.from).toContain('Test PDS')
     })
   })
 
