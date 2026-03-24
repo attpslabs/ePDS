@@ -12,27 +12,62 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { EpdsDb } from '@certified-app/shared'
+import type { HandleMode } from '@certified-app/shared'
 import {
   resolveHandleMode,
   safeResolveClientMetadata,
 } from '../routes/login-page.js'
 import type { ClientMetadata } from '../lib/client-metadata.js'
 
+// ---------------------------------------------------------------------------
+// Shared DB helpers
+// ---------------------------------------------------------------------------
+
+function makeDb(prefix: string): { db: EpdsDb; dbPath: string } {
+  const dbPath = path.join(os.tmpdir(), `${prefix}-${Date.now()}.db`)
+  return { db: new EpdsDb(dbPath), dbPath }
+}
+
+function closeDb(db: EpdsDb, dbPath: string): void {
+  db.close()
+  try {
+    fs.unlinkSync(dbPath)
+    // eslint-disable-next-line no-empty
+  } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// Shared env-var helpers for resolveHandleMode tests
+// ---------------------------------------------------------------------------
+
+function withEnv(value: string | undefined, fn: () => void): void {
+  const orig = process.env.EPDS_DEFAULT_HANDLE_MODE
+  if (value === undefined) {
+    delete process.env.EPDS_DEFAULT_HANDLE_MODE
+  } else {
+    process.env.EPDS_DEFAULT_HANDLE_MODE = value
+  }
+  try {
+    fn()
+  } finally {
+    if (orig === undefined) {
+      delete process.env.EPDS_DEFAULT_HANDLE_MODE
+    } else {
+      process.env.EPDS_DEFAULT_HANDLE_MODE = orig
+    }
+  }
+}
+
 describe('Login page auth_flow creation', () => {
   let db: EpdsDb
   let dbPath: string
 
   beforeEach(() => {
-    dbPath = path.join(os.tmpdir(), `test-login-${Date.now()}.db`)
-    db = new EpdsDb(dbPath)
+    ;({ db, dbPath } = makeDb('test-login'))
   })
 
   afterEach(() => {
-    db.close()
-    try {
-      fs.unlinkSync(dbPath)
-      // eslint-disable-next-line no-empty
-    } catch {}
+    closeDb(db, dbPath)
   })
 
   it('creates an auth_flow row with correct request_uri and client_id', () => {
@@ -154,60 +189,30 @@ describe('Login page handle_mode storage', () => {
   let dbPath: string
 
   beforeEach(() => {
-    dbPath = path.join(os.tmpdir(), `test-handle-mode-${Date.now()}.db`)
-    db = new EpdsDb(dbPath)
+    ;({ db, dbPath } = makeDb('test-handle-mode'))
   })
 
   afterEach(() => {
-    db.close()
-    try {
-      fs.unlinkSync(dbPath)
-      // eslint-disable-next-line no-empty
-    } catch {}
+    closeDb(db, dbPath)
   })
 
-  it('stores "random" handle mode', () => {
-    db.createAuthFlow({
-      flowId: 'hm-random',
-      requestUri: 'urn:req:hm-random',
-      clientId: null,
-      handleMode: 'random',
-      expiresAt: Date.now() + 10 * 60 * 1000,
-    })
-    expect(db.getAuthFlow('hm-random')!.handleMode).toBe('random')
-  })
+  const handleModes: Array<HandleMode | null> = [
+    'random',
+    'picker',
+    'picker-with-random',
+    null,
+  ]
 
-  it('stores "picker" handle mode', () => {
+  it.each(handleModes)('stores handleMode=%s', (handleMode) => {
+    const flowId = `hm-${String(handleMode)}`
     db.createAuthFlow({
-      flowId: 'hm-picker',
-      requestUri: 'urn:req:hm-picker',
+      flowId,
+      requestUri: `urn:req:${flowId}`,
       clientId: null,
-      handleMode: 'picker',
+      handleMode,
       expiresAt: Date.now() + 10 * 60 * 1000,
     })
-    expect(db.getAuthFlow('hm-picker')!.handleMode).toBe('picker')
-  })
-
-  it('stores "picker-with-random" handle mode', () => {
-    db.createAuthFlow({
-      flowId: 'hm-pwr',
-      requestUri: 'urn:req:hm-pwr',
-      clientId: null,
-      handleMode: 'picker-with-random',
-      expiresAt: Date.now() + 10 * 60 * 1000,
-    })
-    expect(db.getAuthFlow('hm-pwr')!.handleMode).toBe('picker-with-random')
-  })
-
-  it('stores null when handle mode is absent (default → picker behavior)', () => {
-    db.createAuthFlow({
-      flowId: 'hm-null',
-      requestUri: 'urn:req:hm-null',
-      clientId: null,
-      handleMode: null,
-      expiresAt: Date.now() + 10 * 60 * 1000,
-    })
-    expect(db.getAuthFlow('hm-null')!.handleMode).toBeNull()
+    expect(db.getAuthFlow(flowId)!.handleMode).toBe(handleMode)
   })
 
   it('getAuthFlowByRequestUri also returns handleMode', () => {
@@ -302,56 +307,36 @@ describe('resolveHandleMode', () => {
   })
 
   it('falls back to env var when query param and client metadata are absent', () => {
-    const origEnv = process.env.EPDS_DEFAULT_HANDLE_MODE
-    process.env.EPDS_DEFAULT_HANDLE_MODE = 'picker-with-random'
-    const result = resolveHandleMode(undefined, {})
-    expect(result).toBe('picker-with-random')
-    // Restore
-    if (origEnv) {
-      process.env.EPDS_DEFAULT_HANDLE_MODE = origEnv
-    } else {
-      delete process.env.EPDS_DEFAULT_HANDLE_MODE
-    }
+    withEnv('picker-with-random', () => {
+      expect(resolveHandleMode(undefined, {})).toBe('picker-with-random')
+    })
   })
 
   it('returns null when no valid mode is provided at any level', () => {
-    const origEnv = process.env.EPDS_DEFAULT_HANDLE_MODE
-    delete process.env.EPDS_DEFAULT_HANDLE_MODE
-    const result = resolveHandleMode(undefined, {})
-    expect(result).toBeNull()
-    // Restore
-    if (origEnv) process.env.EPDS_DEFAULT_HANDLE_MODE = origEnv
+    withEnv(undefined, () => {
+      expect(resolveHandleMode(undefined, {})).toBeNull()
+    })
   })
 
   it('ignores invalid values and falls back to next level', () => {
-    const origEnv = process.env.EPDS_DEFAULT_HANDLE_MODE
-    process.env.EPDS_DEFAULT_HANDLE_MODE = 'random'
     // Cast via unknown to simulate malformed client metadata from a real fetch
     const clientMeta = {
       epds_handle_mode: 'invalid-mode',
     } as unknown as ClientMetadata
-    // Query param is invalid, client metadata is invalid, env var is valid
-    const result = resolveHandleMode('garbage', clientMeta)
-    expect(result).toBe('random')
-    // Restore
-    if (origEnv) {
-      process.env.EPDS_DEFAULT_HANDLE_MODE = origEnv
-    } else {
-      delete process.env.EPDS_DEFAULT_HANDLE_MODE
-    }
+    withEnv('random', () => {
+      // Query param is invalid, client metadata is invalid, env var is valid
+      expect(resolveHandleMode('garbage', clientMeta)).toBe('random')
+    })
   })
 
   it('returns null when all levels have invalid values', () => {
-    const origEnv = process.env.EPDS_DEFAULT_HANDLE_MODE
-    delete process.env.EPDS_DEFAULT_HANDLE_MODE
     // Cast via unknown to simulate malformed client metadata
     const clientMeta = {
       epds_handle_mode: 'invalid-mode',
     } as unknown as ClientMetadata
-    const result = resolveHandleMode('garbage', clientMeta)
-    expect(result).toBeNull()
-    // Restore
-    if (origEnv) process.env.EPDS_DEFAULT_HANDLE_MODE = origEnv
+    withEnv(undefined, () => {
+      expect(resolveHandleMode('garbage', clientMeta)).toBeNull()
+    })
   })
 
   it('prioritizes query param over client metadata', () => {
@@ -361,17 +346,10 @@ describe('resolveHandleMode', () => {
   })
 
   it('prioritizes client metadata over env var', () => {
-    const origEnv = process.env.EPDS_DEFAULT_HANDLE_MODE
-    process.env.EPDS_DEFAULT_HANDLE_MODE = 'random'
     const clientMeta: ClientMetadata = { epds_handle_mode: 'picker' }
-    const result = resolveHandleMode(undefined, clientMeta)
-    expect(result).toBe('picker')
-    // Restore
-    if (origEnv) {
-      process.env.EPDS_DEFAULT_HANDLE_MODE = origEnv
-    } else {
-      delete process.env.EPDS_DEFAULT_HANDLE_MODE
-    }
+    withEnv('random', () => {
+      expect(resolveHandleMode(undefined, clientMeta)).toBe('picker')
+    })
   })
 })
 
