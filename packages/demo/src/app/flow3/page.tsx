@@ -1,12 +1,13 @@
 import { FlowLoginPage } from '../components/FlowLoginPage'
 
-export default function Flow2Page() {
+export default function Flow3Page() {
   return (
     <FlowLoginPage
-      subtitle="Flow 2 — auth server collects email (picker-with-random default)"
+      subtitle="Flow 3 — random handle (server assigns, no picker)"
+      handleMode="random"
       navLinks={[
         { href: '/', label: 'Switch to Flow 1 (email form)' },
-        { href: '/flow3', label: 'Switch to Flow 3 (random handle)' },
+        { href: '/flow2', label: 'Switch to Flow 2 (no email form)' },
         { href: '/flow4', label: 'Switch to Flow 4 (plain picker)' },
       ]}
     />

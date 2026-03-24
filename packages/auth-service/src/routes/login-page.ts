@@ -63,7 +63,7 @@ export async function safeResolveClientMetadata(
 export function resolveHandleMode(
   queryParam: string | undefined,
   clientMeta: ClientMetadata,
-): HandleMode | null {
+): HandleMode {
   for (const raw of [
     queryParam,
     clientMeta.epds_handle_mode,
@@ -73,7 +73,7 @@ export function resolveHandleMode(
       return raw as HandleMode
     }
   }
-  return null
+  return 'picker-with-random'
 }
 
 export function createLoginPageRouter(ctx: AuthServiceContext): Router {
