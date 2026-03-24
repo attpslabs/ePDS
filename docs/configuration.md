@@ -6,17 +6,17 @@ Each package has its own `.env.example` documenting the variables it reads:
 - [`packages/auth-service/.env.example`](../packages/auth-service/.env.example)
 - [`packages/demo/.env.example`](../packages/demo/.env.example)
 
-For quick local setup, run `./scripts/setup.sh` — it copies the top-level
-`.env.example` to `.env` and auto-generates all secrets.
+Run `./scripts/setup.sh` to create and populate all `.env` files and
+auto-generate secrets. Safe to re-run — existing secrets are preserved.
 
 ## Deployment contexts
 
-| Context             | How vars are loaded                                                                                           |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **docker-compose**  | Loads the top-level `.env` via `env_file` for core, auth, and caddy.                                          |
-| **Railway**         | Set per-service in the dashboard. Use shared variable groups for `[shared]` vars.                             |
-| **`pnpm dev`**      | `dotenv.config()` in pds-core loads the top-level `.env`. Auth-service inherits the same process environment. |
-| **`pnpm dev:demo`** | Next.js loads `packages/demo/.env` automatically.                                                             |
+| Context             | How vars are loaded                                                                                                        |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **docker-compose**  | core, auth, and caddy load the top-level `.env` via `env_file`. demo loads `packages/demo/.env`.                           |
+| **Railway**         | Each service reads only its own per-package `.env`. Run `setup.sh` locally, then paste into each service's raw env editor. |
+| **`pnpm dev`**      | `dotenv.config()` in pds-core loads the top-level `.env`. Auth-service inherits the same process environment.              |
+| **`pnpm dev:demo`** | Next.js loads `packages/demo/.env` automatically.                                                                          |
 
 ## Shared variables
 

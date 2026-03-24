@@ -447,9 +447,29 @@ print_next_steps() {
 
 # ── Main ──
 
-main() {
+print_intro() {
   echo "=== ePDS Setup ==="
   echo ""
+  echo "Run this once before first use. It creates .env files for all packages"
+  echo "and auto-generates secrets."
+  echo ""
+  echo "docker-compose / pnpm dev:"
+  echo "  The top-level .env is loaded by the core, auth, and caddy services."
+  echo "  packages/demo/.env is loaded by the demo service (docker-compose)"
+  echo "  and by Next.js when running pnpm dev:demo."
+  echo ""
+  echo "Railway:"
+  echo "  Each service reads only its own per-package .env — the top-level .env"
+  echo "  is not used. Run this script locally, then paste each per-package .env"
+  echo "  into the service's raw environment editor in the Railway dashboard."
+  echo ""
+  echo "Re-running is safe — existing secrets are preserved and prompts show"
+  echo "current values for editing."
+  echo ""
+}
+
+main() {
+  print_intro
   check_prerequisites
   warn_existing_env_files
   setup_toplevel_env

@@ -20,8 +20,15 @@ Point the following records at your server:
 
 ### Configuration
 
-Copy `.env.example` to `.env` and fill in your values.
-See [configuration.md](configuration.md) for a full reference.
+Run the setup script to generate `.env` and `packages/demo/.env` with all
+secrets auto-generated:
+
+```bash
+./scripts/setup.sh
+```
+
+See [configuration.md](configuration.md) for how env vars work across
+deployment contexts and a full variable reference.
 
 ### Build and Start
 
@@ -116,31 +123,24 @@ grep -v '^\s*#' packages/demo/.env | grep -v '^\s*$'
 ```
 
 **Important**: The setup script sets `PDS_INTERNAL_URL=http://core:3000` (the
-Docker Compose service name). For Railway, you **must** change this to the
-pds-core service's Railway internal URL on the auth-service. Find it via:
+Docker Compose service name). For Railway, you **must** update this in the
+auth-service to the pds-core service's Railway internal URL. Find it via:
 
 ```bash
 railway link -s '@certified-app/pds-core'
 railway variables --json | python3 -c "import sys,json; print(json.load(sys.stdin)['RAILWAY_PRIVATE_DOMAIN'])"
 ```
 
-Then set it on the auth-service:
+Then update it on the auth-service:
 
 ```bash
 railway link -s '@certified-app/auth-service'
 railway variables set PDS_INTERNAL_URL=http://<private-domain>:3000
 ```
 
-Without `PDS_INTERNAL_URL` set, the auth service will **crash at startup**
-reporting which of `PDS_INTERNAL_URL` and `EPDS_INTERNAL_SECRET` is missing.
-If `PDS_INTERNAL_URL` is set but incorrect, startup will succeed but
-auth→PDS calls will fail at runtime.
-
-Alternatively, use the Railway CLI:
-
-```bash
-cd packages/pds-core && railway variables set KEY=VALUE ...
-```
+Without a correct `PDS_INTERNAL_URL`, the auth service will **crash at startup**
+if the value is missing, or fail silently on auth→PDS calls at runtime if it
+points to the wrong host.
 
 ### DNS Setup
 
