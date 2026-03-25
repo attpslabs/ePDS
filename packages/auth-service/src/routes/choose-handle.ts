@@ -428,15 +428,21 @@ function renderChooseHandlePage(
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    .container { background: white; border-radius: 12px; padding: 40px; max-width: 420px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .container { background: white; border-radius: 12px; padding: 40px; max-width: max(420px, min(90vw, 600px)); width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
     h1 { font-size: 24px; margin-bottom: 8px; color: #111; }
     .subtitle { color: #666; margin-bottom: 24px; font-size: 15px; line-height: 1.5; }
     .field { margin-bottom: 16px; }
     .field label { display: block; font-size: 14px; font-weight: 500; color: #333; margin-bottom: 6px; }
     .handle-row { display: flex; align-items: center; gap: 0; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: white; }
     .handle-row:focus-within { border-color: #0f1828; }
-    .handle-row input { flex: 1; padding: 10px 12px; border: none; font-size: 16px; outline: none; background: transparent; min-width: 0; }
-    .handle-suffix { padding: 10px 12px; background: #f8f9fa; color: #555; font-size: 15px; white-space: nowrap; border-left: 1px solid #ddd; }
+    .handle-row input { flex: 1; padding: 10px 12px; border: none; font-size: 16px; outline: none; background: transparent; min-width: 120px; }
+    .handle-suffix { padding: 10px 12px; background: #f8f9fa; color: #555; font-size: 15px; white-space: nowrap; border-left: 1px solid #ddd; overflow: hidden; text-overflow: ellipsis; }
+    @media (max-width: 480px) {
+      .container { padding: 24px; }
+      .handle-row { flex-wrap: wrap; }
+      .handle-row input { min-width: 100%; border-bottom: 1px solid #ddd; }
+      .handle-suffix { width: 100%; border-left: none; }
+    }
     .status { min-height: 20px; font-size: 14px; margin-top: 6px; }
     .status.available { color: #28a745; }
     .status.taken { color: #dc3545; }
