@@ -61,8 +61,17 @@ export async function GET(request: NextRequest) {
     const codeVerifier = stateData.codeVerifier
     const tokenUrl = stateData.tokenEndpoint || `${PDS_URL}/oauth/token`
 
-    const clientId = `${baseUrl}/client-metadata.json`
     const redirectUri = `${baseUrl}/api/oauth/callback`
+    const isLoopback =
+      baseUrl.startsWith('http://localhost') ||
+      baseUrl.startsWith('http://127.0.0.1')
+    const loopbackRedirectUri = redirectUri.replace(
+      /^http:\/\/localhost(:\d+)?/,
+      (_, port) => `http://127.0.0.1${port || ''}`,
+    )
+    const clientId = isLoopback
+      ? `http://localhost?scope=${encodeURIComponent('atproto transition:generic')}&redirect_uri=${encodeURIComponent(loopbackRedirectUri)}`
+      : `${baseUrl}/client-metadata.json`
 
     // Exchange code for tokens with DPoP
     const { privateKey, publicJwk } = restoreDpopKeyPair(

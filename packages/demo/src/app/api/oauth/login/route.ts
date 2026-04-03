@@ -101,8 +101,20 @@ export async function GET(request: Request) {
       expectedPdsUrl = pdsUrl
     }
 
-    const clientId = `${baseUrl}/client-metadata.json`
     const redirectUri = `${baseUrl}/api/oauth/callback`
+    // Use loopback client ID for local dev. Per RFC 8252 + AT Protocol spec:
+    // - client_id = http://localhost (hostname)
+    // - redirect_uri = http://127.0.0.1:PORT/... (loopback IP)
+    const isLoopback =
+      baseUrl.startsWith('http://localhost') ||
+      baseUrl.startsWith('http://127.0.0.1')
+    const loopbackRedirectUri = redirectUri.replace(
+      /^http:\/\/localhost(:\d+)?/,
+      (_, port) => `http://127.0.0.1${port || ''}`,
+    )
+    const clientId = isLoopback
+      ? `http://localhost?scope=${encodeURIComponent('atproto transition:generic')}&redirect_uri=${encodeURIComponent(loopbackRedirectUri)}`
+      : `${baseUrl}/client-metadata.json`
 
     // Generate PKCE
     const codeVerifier = generateCodeVerifier()
@@ -121,7 +133,7 @@ export async function GET(request: Request) {
     // Push Authorization Request (PAR)
     const parBody = new URLSearchParams({
       client_id: clientId,
-      redirect_uri: redirectUri,
+      redirect_uri: isLoopback ? loopbackRedirectUri : redirectUri,
       response_type: 'code',
       scope: 'atproto transition:generic',
       state,

@@ -44,6 +44,11 @@ async function main() {
   const authHostname = process.env.AUTH_HOSTNAME || 'auth.localhost'
   const handleDomain = process.env.PDS_HOSTNAME || 'localhost'
   const pdsUrl = cfg.service.publicUrl || `https://${handleDomain}`
+  const authProto =
+    authHostname === 'localhost' || authHostname.startsWith('localhost:')
+      ? 'http'
+      : 'https'
+  const authBaseUrl = `${authProto}://${authHostname}`
 
   const pds = await PDS.create(cfg, secrets)
   const ctx = pds.ctx
@@ -192,7 +197,7 @@ async function main() {
           )
           res.redirect(
             303,
-            `https://${authHostname}/auth/choose-handle?error=handle_taken`,
+            `${authBaseUrl}/auth/choose-handle?error=handle_taken`,
           )
           return
         }
@@ -233,7 +238,7 @@ async function main() {
             )
             res.redirect(
               303,
-              `https://${authHostname}/auth/choose-handle?error=handle_taken`,
+              `${authBaseUrl}/auth/choose-handle?error=handle_taken`,
             )
             return
           }
@@ -398,7 +403,7 @@ async function main() {
       req.method === 'GET' &&
       req.path === '/.well-known/oauth-authorization-server'
     ) {
-      const authUrl = `https://${authHostname}`
+      const authUrl = authBaseUrl
       res.setHeader('Access-Control-Allow-Origin', '*')
       res.setHeader('Cache-Control', 'public, max-age=300')
       res.setHeader('Content-Type', 'application/json')

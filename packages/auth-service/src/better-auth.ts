@@ -87,7 +87,7 @@ export async function runBetterAuthMigrations(
   const tempAuth = betterAuth({
     secret: process.env.AUTH_SESSION_SECRET,
     database: betterAuthDb,
-    baseURL: `https://${authHostname}`,
+    baseURL: `${authHostname.startsWith('localhost') ? 'http' : 'https'}://${authHostname}`,
     basePath: '/api/auth',
     plugins: [
       emailOTP({
@@ -155,7 +155,7 @@ export function createBetterAuth(
     // emit succeeds without casting the entire createBetterAuth return value.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     database: betterAuthDb as any,
-    baseURL: `https://${authHostname}`,
+    baseURL: `${authHostname.startsWith('localhost') ? 'http' : 'https'}://${authHostname}`,
     basePath: '/api/auth',
 
     session: {
