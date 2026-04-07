@@ -14,6 +14,7 @@
  */
 
 import type { HandleMode } from './handle.js'
+import { makeSafeFetch } from './safe-fetch.js'
 
 export interface ClientBranding {
   css?: string
@@ -52,9 +53,15 @@ interface CacheEntry {
 }
 
 const CACHE_TTL_MS = 10 * 60 * 1000 // 10 minutes
-const FETCH_TIMEOUT_MS = 5000
 
 const cache = new Map<string, CacheEntry>()
+
+/** Clears the in-memory cache. Intended for use in tests only. */
+export function clearClientMetadataCache(): void {
+  cache.clear()
+}
+
+const safeFetch = makeSafeFetch({ timeoutMs: 5_000 })
 
 export async function resolveClientName(clientId: string): Promise<string> {
   const metadata = await resolveClientMetadata(clientId)
@@ -64,8 +71,14 @@ export async function resolveClientName(clientId: string): Promise<string> {
 export async function resolveClientMetadata(
   clientId: string,
 ): Promise<ClientMetadata> {
-  // Only fetch if client_id looks like a URL
-  if (!clientId.startsWith('http://') && !clientId.startsWith('https://')) {
+  // Only attempt a fetch for URL-shaped client IDs
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(clientId)
+  } catch {
+    return { client_name: clientId }
+  }
+  if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
     return { client_name: clientId }
   }
 
@@ -76,17 +89,11 @@ export async function resolveClientMetadata(
   }
 
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => {
-      controller.abort()
-    }, FETCH_TIMEOUT_MS)
-
-    const res = await fetch(clientId, {
-      signal: controller.signal,
+    // safeFetch enforces HTTPS, blocks private/reserved IPs, and applies a
+    // timeout — throws for any blocked or failed request
+    const res = await safeFetch(clientId, {
       headers: { Accept: 'application/json' },
     })
-
-    clearTimeout(timeout)
 
     if (!res.ok) {
       return fallback(clientId)

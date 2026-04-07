@@ -11,5 +11,6 @@ export {
   resolveClientName,
   escapeCss,
   getClientCss,
+  clearClientMetadataCache,
 } from '@certified-app/shared'
 export type { ClientMetadata, ClientBranding } from '@certified-app/shared'
