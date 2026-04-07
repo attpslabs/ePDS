@@ -52,12 +52,12 @@ async function buildIncorrectOtpCode(world: EpdsWorld): Promise<string> {
   ])
 
   const otpLength = Number(maxLengthAttr ?? '') || testEnv.otpLength
-  const otpCharset =
-    inputModeAttr === 'numeric' || patternAttr === `[0-9]{${otpLength}}`
-      ? 'numeric'
-      : patternAttr === `[A-Z0-9]{${otpLength}}`
-        ? 'alphanumeric'
-        : testEnv.otpCharset
+  let otpCharset: 'numeric' | 'alphanumeric' = testEnv.otpCharset
+  if (inputModeAttr === 'numeric' || patternAttr === `[0-9]{${otpLength}}`) {
+    otpCharset = 'numeric'
+  } else if (patternAttr === `[A-Z0-9]{${otpLength}}`) {
+    otpCharset = 'alphanumeric'
+  }
 
   return mutateOtpCode('0'.repeat(otpLength), otpCharset)
 }
@@ -347,9 +347,17 @@ When(
 
     for (let i = 0; i < times; i++) {
       await page.fill('#code', wrongOtp)
-      await page.click('#form-verify-otp .btn-primary')
-      // Wait for the error message to appear before the next attempt so we
-      // don't submit a new code before the server has processed the previous one
+      await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            response.request().method() === 'POST' &&
+            response.url().includes('/sign-in/email-otp'),
+          { timeout: 10_000 },
+        ),
+        page.click('#form-verify-otp .btn-primary'),
+      ])
+      // Wait for the failed state after each submit so the flow remains stable
+      // and we do not race into the next attempt.
       await expect(page.locator('#error-msg')).toBeVisible({ timeout: 10_000 })
     }
   },

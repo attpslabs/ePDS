@@ -53,9 +53,11 @@ async function assertPdsAccountMissing(did: string): Promise<void> {
   const res = await fetch(
     `${testEnv.pdsUrl}/xrpc/com.atproto.repo.describeRepo?repo=${encodeURIComponent(did)}`,
   )
-  if (res.ok) {
+  const body = (await res.json()) as { error?: string }
+
+  if (res.status !== 400 || body.error !== 'RepoNotFound') {
     throw new Error(
-      `Expected repo to be missing for DID "${did}" but describeRepo returned ${res.status}`,
+      `Expected RepoNotFound for DID "${did}" but got status ${res.status} with body ${JSON.stringify(body)}`,
     )
   }
 }
@@ -264,15 +266,19 @@ When('the user submits a valid new handle', async function (this: EpdsWorld) {
     localPart = generateHandleLocalPart(12)
   }
 
-  this.updatedHandleLocalPart = localPart
-  this.updatedHandle = `${localPart}.${getPdsDomain()}`
-
   await page.fill('input[name="handle"]', localPart)
-  const authBase = escapeForRegex(testEnv.authUrl)
   await Promise.all([
-    page.waitForURL(new RegExp(`^${authBase}/account(\\?.*)?$`)),
+    page.waitForURL(
+      (url) =>
+        url.origin === testEnv.authUrl &&
+        url.pathname === '/account' &&
+        url.searchParams.get('success') === 'handle_updated',
+    ),
     page.getByRole('button', { name: 'Update' }).click(),
   ])
+
+  this.updatedHandleLocalPart = localPart
+  this.updatedHandle = `${localPart}.${getPdsDomain()}`
 })
 
 Then("the user's handle is updated", function (this: EpdsWorld) {

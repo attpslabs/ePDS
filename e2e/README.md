@@ -74,6 +74,40 @@ pnpm test:e2e
 pnpm test:e2e:headless
 ```
 
+### Run a single feature
+
+`pnpm test:e2e` and `pnpm test:e2e:headless` use `e2e/cucumber.mjs`, which
+defines a `paths` list. If you pass a feature path on the CLI, the current
+`cucumber-js` version merges that path with configured `paths`, so it can run
+multiple features.
+
+To run only one feature, invoke `cucumber-js` directly:
+
+```bash
+E2E_HEADLESS=true TSX_TSCONFIG_PATH=e2e/tsconfig.e2e.json \
+node --import tsx/esm ./node_modules/@cucumber/cucumber/bin/cucumber-js \
+  --import 'e2e/step-definitions/**/*.ts' \
+  --import 'e2e/support/**/*.ts' \
+  --format pretty \
+  --format html:reports/e2e.html \
+  --tags 'not @manual and not @docker-only and not @pending' \
+  --strict \
+  features/account-settings.feature
+```
+
+### Run a single scenario by name
+
+Use `--name` with a scenario title (and keep the feature path scoped to reduce
+search time):
+
+```bash
+pnpm run test:e2e:headless --name "User deletes their account"
+```
+
+You cannot run a step definition file directly (for example
+`e2e/step-definitions/account-settings.steps.ts`). Cucumber runs feature files
+or scenarios and loads step definitions via `--import`.
+
 ### What to expect
 
 - **OTP / email scenarios** are automatically marked `pending` (not failed)

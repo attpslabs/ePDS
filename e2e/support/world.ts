@@ -37,8 +37,8 @@ export class EpdsWorld extends World {
   /** HTTP status code from the most recent direct API call — set by API steps. */
   lastHttpStatus?: number
 
-  /** Response body from the most recent internal API call — set by internal-api steps. */
-  lastApiResponse?: Record<string, unknown>
+  /** Parsed JSON body from the most recent direct HTTP call — set by API steps. */
+  lastHttpJson?: Record<string, unknown>
 
   /** Most recent PAR request_uri — set by PAR submission steps. */
   lastRequestUri?: string

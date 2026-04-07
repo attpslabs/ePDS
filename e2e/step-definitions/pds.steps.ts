@@ -92,6 +92,8 @@ Then(
     if (!testEnv.mailpitPass) return 'pending'
     if (!this.userHandle)
       throw new Error('No userHandle — account creation step must run first')
+    if (!this.userDid)
+      throw new Error('No userDid — account creation step must run first')
     // /.well-known/atproto-did is served by pds-core for every valid handle subdomain
     const url = `https://${this.userHandle}/.well-known/atproto-did`
     const res = await fetch(url)
@@ -99,8 +101,11 @@ Then(
       throw new Error(`HTTPS check failed for "${url}": ${res.status}`)
     }
     const text = (await res.text()).trim()
-    if (!text.startsWith('did:')) {
-      throw new Error(`Expected a DID at ${url} but got: "${text}"`)
+    const expectedDid = this.userDid.trim()
+    if (text !== expectedDid) {
+      throw new Error(
+        `Expected DID "${expectedDid}" at ${url} but got: "${text}"`,
+      )
     }
   },
 )
@@ -123,7 +128,9 @@ When(
         }),
       },
     )
+    const body = (await res.json()) as Record<string, unknown>
     this.lastHttpStatus = res.status
+    this.lastHttpJson = body
   },
 )
 
@@ -132,11 +139,28 @@ Then(
   function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'
     const status = this.lastHttpStatus
+    const body = this.lastHttpJson
     if (!status)
       throw new Error('No HTTP status — createSession step must run first')
-    if (status < 400 || status >= 500) {
+    if (!body)
+      throw new Error('No HTTP JSON body — createSession step must run first')
+    if (status !== 401) {
       throw new Error(
-        `Expected createSession to fail (4xx) but got status ${status}`,
+        `Expected createSession to fail with 401 but got status ${status}`,
+      )
+    }
+
+    const error = body.error
+    if (error !== 'AuthenticationRequired') {
+      throw new Error(
+        `Expected error "AuthenticationRequired" but got "${String(error)}"`,
+      )
+    }
+
+    const message = body.message
+    if (message !== 'Invalid identifier or password') {
+      throw new Error(
+        `Expected message "Invalid identifier or password" but got "${String(message)}"`,
       )
     }
   },

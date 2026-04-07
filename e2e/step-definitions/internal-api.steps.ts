@@ -38,16 +38,16 @@ When(
       this.env.internalSecret,
     )
     this.lastHttpStatus = status
-    this.lastApiResponse = body
+    this.lastHttpJson = body
   },
 )
 
 Then("the response contains the account's DID", function (this: EpdsWorld) {
   if (!this.userDid)
     throw new Error('No userDid — account creation step must run first')
-  if (!this.lastApiResponse)
+  if (!this.lastHttpJson)
     throw new Error('No API response — query step must run first')
-  const did = this.lastApiResponse.did
+  const did = this.lastHttpJson.did
   if (did !== this.userDid) {
     throw new Error(`Expected DID "${this.userDid}" but got "${String(did)}"`)
   }
@@ -62,7 +62,7 @@ When(
       this.env.internalSecret,
     )
     this.lastHttpStatus = status
-    this.lastApiResponse = body
+    this.lastHttpJson = body
   },
 )
 
@@ -75,11 +75,11 @@ Then('the response status is 200', function (this: EpdsWorld) {
 })
 
 Then('the response body has a null DID', function (this: EpdsWorld) {
-  if (!this.lastApiResponse)
+  if (!this.lastHttpJson)
     throw new Error('No API response — query step must run first')
-  if (this.lastApiResponse.did !== null) {
+  if (this.lastHttpJson.did !== null) {
     throw new Error(
-      `Expected did to be null but got "${this.lastApiResponse.did as string}"`,
+      `Expected did to be null but got "${this.lastHttpJson.did as string}"`,
     )
   }
 })
@@ -98,16 +98,16 @@ When(
       this.env.internalSecret,
     )
     this.lastHttpStatus = status
-    this.lastApiResponse = body
+    this.lastHttpJson = body
   },
 )
 
 Then("the response contains the account's email", function (this: EpdsWorld) {
   if (!this.testEmail)
     throw new Error('No testEmail — account creation step must run first')
-  if (!this.lastApiResponse)
+  if (!this.lastHttpJson)
     throw new Error('No API response — query step must run first')
-  const email = this.lastApiResponse.email
+  const email = this.lastHttpJson.email
   if (email !== this.testEmail) {
     throw new Error(
       `Expected email "${this.testEmail}" but got "${String(email)}"`,
@@ -129,16 +129,16 @@ When(
       this.env.internalSecret,
     )
     this.lastHttpStatus = status
-    this.lastApiResponse = body
+    this.lastHttpJson = body
   },
 )
 
 Then('the response indicates the handle exists', function (this: EpdsWorld) {
-  if (!this.lastApiResponse)
+  if (!this.lastHttpJson)
     throw new Error('No API response — query step must run first')
-  if (this.lastApiResponse.exists !== true) {
+  if (this.lastHttpJson.exists !== true) {
     throw new Error(
-      `Expected exists to be true but got "${String(this.lastApiResponse.exists)}"`,
+      `Expected exists to be true but got "${String(this.lastHttpJson.exists)}"`,
     )
   }
 })
@@ -155,7 +155,7 @@ When(
       'definitely-wrong-secret',
     )
     this.lastHttpStatus = status
-    this.lastApiResponse = body
+    this.lastHttpJson = body
   },
 )
 
@@ -167,7 +167,7 @@ When(
       null,
     )
     this.lastHttpStatus = status
-    this.lastApiResponse = body
+    this.lastHttpJson = body
   },
 )
 
@@ -179,7 +179,7 @@ When(
       'definitely-wrong-secret',
     )
     this.lastHttpStatus = status
-    this.lastApiResponse = body
+    this.lastHttpJson = body
   },
 )
 
@@ -192,9 +192,9 @@ Then('the response status is 401', function (this: EpdsWorld) {
 })
 
 Then('the response body contains an auth error', function (this: EpdsWorld) {
-  if (!this.lastApiResponse)
+  if (!this.lastHttpJson)
     throw new Error('No API response — query step must run first')
-  const error = this.lastApiResponse.error
+  const error = this.lastHttpJson.error
   if (typeof error !== 'string' || !error) {
     throw new Error(
       `Expected response body to contain an error string but got "${String(error)}"`,
