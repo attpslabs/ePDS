@@ -6,7 +6,7 @@ Feature: Passwordless authentication via email OTP
 
   Background:
     Given the ePDS test environment is running
-    And a demo OAuth client is registered
+    And the demo OAuth client's metadata is discoverable
 
   # --- Happy path ---
 

@@ -9,7 +9,7 @@ Feature: ePDS callback — the core integration bridge
 
   Background:
     Given the ePDS test environment is running
-    And a demo OAuth client is registered
+    And the demo OAuth client's metadata is discoverable
 
   Scenario: Callback for a new user creates an account and redirects to consent
     Given no PDS account exists for "newuser@example.com"

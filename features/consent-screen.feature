@@ -10,7 +10,8 @@ Feature: OAuth consent screen
 
   Background:
     Given the ePDS test environment is running
-    And a demo OAuth client is registered
+    And the trusted demo OAuth client's metadata is discoverable
+    And the untrusted demo OAuth client's metadata is discoverable
 
   Scenario: Existing user sees consent screen for a new client
     Given a returning user has a PDS account
