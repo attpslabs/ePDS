@@ -25,6 +25,33 @@ function generateHandleLocalPart(): string {
 }
 
 /**
+ * Drive the /auth/choose-handle page: wait for it, generate and fill a valid
+ * local part, wait for the client-side availability check to confirm
+ * "available", then click Create.
+ *
+ * Exported so that both createAccountViaOAuth (setup-time, inside a Given)
+ * and the active-scenario "When the user picks a handle" step (inside the
+ * passwordless-authentication "new user" scenario) can share the same
+ * implementation without duplication.
+ *
+ * The availability check is debounced client-side at 500ms, so waiting for
+ * the `.status.available` text (not just the submit button state) is the
+ * only race-free way to know it's safe to click Create.
+ */
+export async function pickHandle(world: EpdsWorld): Promise<void> {
+  const page = world.page
+  if (!page) throw new Error('page is not initialised')
+
+  await page.waitForURL('**/auth/choose-handle', { timeout: 30_000 })
+  const localPart = generateHandleLocalPart()
+  await page.fill('#handle-input', localPart)
+  await expect(page.locator('#handle-status.available')).toBeVisible({
+    timeout: 10_000,
+  })
+  await page.click('#submit-btn')
+}
+
+/**
  * Drive the full new-user OAuth sign-up flow through the demo app.
  *
  * The default auth-service config has `handleMode='picker'`, so after OTP
@@ -72,18 +99,9 @@ export async function createAccountViaOAuth(
   await page.fill('#code', otp)
   await page.click('#form-verify-otp .btn-primary')
 
-  // Pick a handle on the /auth/choose-handle page. The page runs client-side
-  // availability checks debounced at 500ms, so we wait for the "available"
-  // status text (not just the submit button state) before clicking Create —
-  // otherwise the POST can race the check and land on a disabled button or
-  // stale state.
-  await page.waitForURL('**/auth/choose-handle', { timeout: 30_000 })
-  const localPart = generateHandleLocalPart()
-  await page.fill('#handle-input', localPart)
-  await expect(page.locator('#handle-status.available')).toBeVisible({
-    timeout: 10_000,
-  })
-  await page.click('#submit-btn')
+  // Pick a handle on the /auth/choose-handle page. The handle-picking logic
+  // is shared with the "When the user picks a handle" step definition.
+  await pickHandle(world)
 
   await page.waitForURL('**/welcome', { timeout: 30_000 })
 

@@ -1,7 +1,9 @@
 Feature: Automatic account creation on first login
   When a user authenticates for the first time (no existing PDS account
-  for their email), ePDS automatically creates a PDS account. The user
-  never needs to choose a handle or password.
+  for their email), ePDS automatically creates a PDS account as a
+  side-effect of the OAuth flow — the user does not visit a separate
+  sign-up form, they just pick a handle during the login flow and the
+  account is provisioned for them. No password is ever created.
 
   Handle generation and crypto primitives are unit-tested. These scenarios
   test the observable end-to-end behavior.

@@ -3,7 +3,7 @@ import { expect } from '@playwright/test'
 import { testEnv } from '../support/env.js'
 import type { EpdsWorld } from '../support/world.js'
 import { getPage, resetBrowserContext } from '../support/utils.js'
-import { createAccountViaOAuth } from '../support/flows.js'
+import { createAccountViaOAuth, pickHandle } from '../support/flows.js'
 import { sharedBrowser } from '../support/hooks.js'
 import { waitForEmail, extractOtp, clearMailpit } from '../support/mailpit.js'
 
@@ -255,6 +255,17 @@ When('the user enters the OTP code', async function (this: EpdsWorld) {
     throw new Error('No OTP code available — email step must run first')
   await this.page?.fill('#code', this.otpCode)
   await this.page?.click('#form-verify-otp .btn-primary')
+})
+
+/**
+ * Drives the /auth/choose-handle page shown to new users after OTP
+ * verification when the auth service is running in picker mode (the default).
+ * In random-handle mode (@handle-random) the user is redirected past this
+ * page and this step is not used.
+ */
+When('the user picks a handle', async function (this: EpdsWorld) {
+  if (!testEnv.mailpitPass) return 'pending'
+  await pickHandle(this)
 })
 
 // ---------------------------------------------------------------------------

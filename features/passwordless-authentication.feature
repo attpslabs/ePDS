@@ -21,6 +21,7 @@ Feature: Passwordless authentication via email OTP
     And the email subject contains "Welcome"
     And the login page shows an OTP verification form
     When the user enters the OTP code
+    And the user picks a handle
     Then the browser is redirected back to the demo client
     And the demo client has a valid OAuth access token
 
