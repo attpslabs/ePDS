@@ -15,7 +15,7 @@ export function GET() {
 
   const metadata = {
     client_id: `${baseUrl}/client-metadata.json`,
-    client_name: 'ePDS Demo',
+    client_name: process.env.EPDS_CLIENT_NAME ?? 'ePDS Demo',
     client_uri: baseUrl,
     logo_uri: `${baseUrl}/certified-logo.png`,
     redirect_uris: [`${baseUrl}/api/oauth/callback`],

@@ -13,13 +13,34 @@ import { testEnv } from '../support/env.js'
 import { getPage } from '../support/utils.js'
 
 // Note: When('the user clicks {string}') lives in common.steps.ts — it is a
-// generic UI interaction step used here for "Approve" and "Deny" buttons.
+// generic UI interaction step used here for "Authorize" and "Deny access" buttons.
 
 Then('a consent screen is displayed', async function (this: EpdsWorld) {
   const page = getPage(this)
-  await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible({
+
+  // Assert the Authorize button is rendered.
+  await expect(page.getByRole('button', { name: 'Authorize' })).toBeVisible({
     timeout: 30_000,
   })
+
+  // Assert the permissions-request preamble. This is the fixed English
+  // copy rendered by @atproto/oauth-provider-ui in its consent-form view,
+  // just above the <ul> listing the requested scopes. Anchoring on it
+  // ensures we're looking at the real consent screen (not e.g. an empty
+  // layout that happens to contain an Authorize button).
+  await expect(
+    page.getByText(
+      'This application is requesting the following list of technical permissions',
+    ),
+  ).toBeVisible()
+
+  // Assert at least one scope is rendered in the <code> list items below
+  // the preamble. The upstream view renders each scope as
+  // <li><code>{scope}</code></li>; every real OAuth request carries at
+  // minimum the `atproto` scope, so its presence is a safe invariant.
+  await expect(
+    page.locator('ul li code').filter({ hasText: 'atproto' }).first(),
+  ).toBeVisible()
 })
 
 Then("it shows the demo client's name", async function (this: EpdsWorld) {

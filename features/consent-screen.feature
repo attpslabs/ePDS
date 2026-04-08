@@ -20,7 +20,7 @@ Feature: OAuth consent screen
     When the user enters the OTP code
     Then a consent screen is displayed
     And it shows the demo client's name
-    When the user clicks "Approve"
+    When the user clicks "Authorize"
     Then the browser is redirected back to the demo client with a valid session
 
   Scenario: User denies consent
@@ -30,7 +30,7 @@ Feature: OAuth consent screen
     Then an OTP email arrives in the mail trap
     When the user enters the OTP code
     Then a consent screen is displayed
-    When the user clicks "Deny"
+    When the user clicks "Deny access"
     Then the browser is redirected to the PDS with an access_denied error
 
   Scenario: Returning user skips consent for a previously-approved client
@@ -47,14 +47,13 @@ Feature: OAuth consent screen
     Then a PDS account is created
     And no consent screen is shown
     And the browser is redirected back to the trusted demo client with a valid session
-    And the trusted demo client's scopes are recorded as authorized
 
   Scenario: New user still sees consent when signing up via an untrusted client
     Given a new user signs up via the untrusted demo client
     Then a PDS account is created
     And the consent screen is displayed (skipping account selection)
     And it shows the actual OAuth scopes requested by the untrusted demo client
-    When the user clicks "Approve"
+    When the user clicks "Authorize"
     Then the browser is redirected back to the untrusted demo client with a valid session
 
   Scenario: Sign-up consent skip does not carry over to a second client

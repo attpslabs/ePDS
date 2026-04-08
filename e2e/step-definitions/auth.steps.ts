@@ -145,10 +145,10 @@ Given(
     await page.click('#form-verify-otp .btn-primary')
 
     // Approve consent — this records the client_logins entry
-    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible({
+    await expect(page.getByRole('button', { name: 'Authorize' })).toBeVisible({
       timeout: 30_000,
     })
-    await page.getByRole('button', { name: 'Approve' }).click()
+    await page.getByRole('button', { name: 'Authorize' }).click()
     await page.waitForURL('**/welcome', { timeout: 30_000 })
 
     await clearMailpit(email)
@@ -229,10 +229,10 @@ When(
 
 When('the user approves the consent screen', async function (this: EpdsWorld) {
   const page = getPage(this)
-  await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible({
+  await expect(page.getByRole('button', { name: 'Authorize' })).toBeVisible({
     timeout: 30_000,
   })
-  await page.getByRole('button', { name: 'Approve' }).click()
+  await page.getByRole('button', { name: 'Authorize' }).click()
 })
 
 // ---------------------------------------------------------------------------
