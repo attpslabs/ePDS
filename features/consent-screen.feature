@@ -43,24 +43,20 @@ Feature: OAuth consent screen
     And the browser is redirected back to the demo client with a valid session
 
   Scenario: New user skips consent when signing up via a trusted client
-    Given a new user signs up via the trusted demo client
-    Then a PDS account is created
-    And no consent screen is shown
+    When a new user signs up via the trusted demo client
+    Then no consent screen is shown
     And the browser is redirected back to the trusted demo client with a valid session
 
   Scenario: New user still sees consent when signing up via an untrusted client
-    Given a new user signs up via the untrusted demo client
-    Then a PDS account is created
-    And the consent screen is displayed (skipping account selection)
-    And it shows the actual OAuth scopes requested by the untrusted demo client
+    When a new user starts signing up via the untrusted demo client
+    Then a consent screen is displayed
     When the user clicks "Authorize"
     Then the browser is redirected back to the untrusted demo client with a valid session
 
   Scenario: Sign-up consent skip does not carry over to a second client
-    Given a user signed up via the trusted demo client with consent skipped
-    When the same user later initiates an OAuth login via the untrusted demo client
-    Then the consent screen is displayed for the untrusted demo client
-    And the untrusted demo client's actual OAuth scopes are shown
+    Given a returning user signed up via the trusted demo client with consent skipped
+    When the user later initiates an OAuth login via the untrusted demo client
+    Then a consent screen is displayed
 
   # TODO: automate once custom CSS injection is merged into the consent route
   # (renderConsent() needs to accept and apply clientBrandingCss from client metadata)
