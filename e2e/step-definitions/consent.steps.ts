@@ -15,6 +15,12 @@ import { getPage } from '../support/utils.js'
 // Note: When('the user clicks {string}') lives in common.steps.ts — it is a
 // generic UI interaction step used here for "Authorize" and "Deny access" buttons.
 
+// Exact scope set requested by both demo clients (trusted and untrusted).
+// Sourced from packages/demo/src/app/client-metadata.json/route.ts — if the
+// demo clients ever change which scopes they request, update this list in
+// lock-step. Order is not significant: the assertion sorts both sides.
+const DEMO_CLIENT_REQUESTED_SCOPES = ['atproto', 'transition:generic']
+
 Then('a consent screen is displayed', async function (this: EpdsWorld) {
   const page = getPage(this)
 
@@ -34,13 +40,17 @@ Then('a consent screen is displayed', async function (this: EpdsWorld) {
     ),
   ).toBeVisible()
 
-  // Assert at least one scope is rendered in the <code> list items below
+  // Assert the exact set of scopes rendered in the <code> list items below
   // the preamble. The upstream view renders each scope as
-  // <li><code>{scope}</code></li>; every real OAuth request carries at
-  // minimum the `atproto` scope, so its presence is a safe invariant.
-  await expect(
-    page.locator('ul li code').filter({ hasText: 'atproto' }).first(),
-  ).toBeVisible()
+  // <li><code>{scope}</code></li>. Checking the exact set (not just a
+  // substring match) catches both under-asking and over-asking regressions.
+  const byLocale = (a: string, b: string): number => a.localeCompare(b)
+  const renderedScopes = (await page.locator('ul li code').allTextContents())
+    .map((s) => s.trim())
+    .sort(byLocale)
+  expect(renderedScopes).toEqual(
+    [...DEMO_CLIENT_REQUESTED_SCOPES].sort(byLocale),
+  )
 })
 
 Then("it shows the demo client's name", async function (this: EpdsWorld) {
