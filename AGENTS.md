@@ -47,6 +47,29 @@ pnpm vitest run packages/shared
 Tests live in `packages/<name>/src/__tests__/`. There is no per-package test
 script — all tests are run from the root via vitest.
 
+### End-to-end tests in CI
+
+The e2e suite lives in `e2e/` and its feature files in `features/`. Normally
+the `E2E tests` workflow (`.github/workflows/e2e-pr.yml`) runs itself off
+Railway's `deployment_status` webhook — no action needed on an ordinary PR.
+
+To manually trigger it against a Railway environment (for e2e-only changes
+that don't cause a rebuild, or to re-run without a new commit), **always
+pass both `--ref` and `-f env_name`**:
+
+```bash
+gh workflow run e2e-pr.yml \
+  --ref <your-branch> \
+  -f env_name="ePDS / ePDS-pr-<N>"
+```
+
+`--ref` controls which version of the feature files, step definitions, and
+workflow YAML get checked out. Without it, `gh workflow run` defaults to
+`main` and you'll silently test old code against the right environment.
+See [`e2e/README.md`](e2e/README.md#running-the-ci-e2e-job-against-a-railway-environment)
+for details (env-name formats, URL derivation, how to handle missing Railway
+domains).
+
 ### Writing Tests
 
 Before designing or writing new tests, read
