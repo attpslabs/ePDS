@@ -16,13 +16,30 @@ interface MailpitSearchResponse {
   messages?: MailpitMessage[]
 }
 
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError'
+}
+
 async function searchMessages(
   query: string,
   limit: number,
+  opts?: { signal?: AbortSignal; timeoutMs?: number },
 ): Promise<MailpitMessage[]> {
+  const signals: AbortSignal[] = []
+  if (opts?.signal) {
+    signals.push(opts.signal)
+  }
+  if (opts?.timeoutMs !== undefined) {
+    signals.push(AbortSignal.timeout(opts.timeoutMs))
+  }
+  const signal = signals.length > 0 ? AbortSignal.any(signals) : undefined
+
   const res = await fetch(
     `${testEnv.mailpitUrl}/api/v1/search?query=${encodeURIComponent(query)}&limit=${limit}`,
-    { headers: { Authorization: mailpitAuthHeader() } },
+    {
+      headers: { Authorization: mailpitAuthHeader() },
+      signal,
+    },
   )
 
   if (!res.ok) {
@@ -49,20 +66,30 @@ export async function waitForEmail(
   timeoutMs = 60_000,
 ): Promise<MailpitMessage> {
   const interval = 500
-  const attempts = Math.ceil(timeoutMs / interval)
+  const deadline = Date.now() + timeoutMs
 
-  for (let i = 0; i < attempts; i++) {
+  while (Date.now() < deadline) {
+    const remainingMs = deadline - Date.now()
+
     try {
-      const messages = await searchMessages(query, 1)
+      const messages = await searchMessages(query, 1, {
+        timeoutMs: remainingMs,
+      })
       if (messages.length > 0) {
         return messages[0]
       }
     } catch (err) {
-      if (err instanceof Error && err.message.includes('client error')) {
-        throw err
+      if (isAbortError(err)) {
+        break
       }
+      throw err
     }
-    await new Promise<void>((r) => setTimeout(r, interval))
+
+    const sleepMs = Math.min(interval, deadline - Date.now())
+    if (sleepMs <= 0) {
+      break
+    }
+    await new Promise<void>((r) => setTimeout(r, sleepMs))
   }
 
   throw new Error(`No email matching "${query}" arrived within ${timeoutMs}ms`)
@@ -82,9 +109,17 @@ export async function waitForEmail(
  * for buildIncorrectOtpCode in auth.steps.ts.
  */
 export async function extractOtp(messageId: string): Promise<string> {
-  const res = await fetch(`${testEnv.mailpitUrl}/view/${messageId}.txt`, {
+  const messageUrl = `${testEnv.mailpitUrl}/view/${messageId}.txt`
+  const res = await fetch(messageUrl, {
     headers: { Authorization: mailpitAuthHeader() },
   })
+
+  if (!res.ok) {
+    throw new Error(
+      `Mailpit message fetch failed: status=${res.status} statusText=${res.statusText || 'unknown'} messageId=${messageId} url=${messageUrl}`,
+    )
+  }
+
   const body = await res.text()
 
   // Default templates: raw code on its own line
@@ -101,7 +136,9 @@ export async function extractOtp(messageId: string): Promise<string> {
   const inlineAlphanum = /\bis:\s*([A-Z0-9]{4,12})\s*$/m.exec(body)
   if (inlineAlphanum) return inlineAlphanum[1]
 
-  throw new Error(`Could not extract OTP from email body:\n${body}`)
+  throw new Error(
+    `Could not extract OTP from Mailpit message text: messageId=${messageId}`,
+  )
 }
 
 /**
