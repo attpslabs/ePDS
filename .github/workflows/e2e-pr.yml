@@ -236,7 +236,7 @@ jobs:
             # rather than walking back to find an older success,
             # because that would mask a genuinely broken env.
             if [ "$state" = "none" ] && [ "$i" -ge "$GRACE_ATTEMPTS" ]; then
-              echo "::notice::No Railway deployment for $SHA after ${GRACE_ATTEMPTS}0s — push doesn't touch any watched path. Falling back to newest deployment in $TARGET_DESC."
+              echo "::notice::No Railway deployment for $SHA after $((GRACE_ATTEMPTS * 5))s — push doesn't touch any watched path. Falling back to newest deployment in $TARGET_DESC."
               newest=$(find_newest_deploy)
               if [ -z "$newest" ] || [ "$newest" = "null" ]; then
                 echo "::error::No Railway deployments exist for $TARGET_DESC at all. Is this a brand-new context whose first deploy hasn't landed yet? Push a change under one of Railway's watchPatterns to force a fresh build, or retrigger manually via workflow_dispatch once Railway's env is up."
