@@ -1,6 +1,6 @@
 name: E2E tests
 on:
-  deployment_status:
+  pull_request:
   workflow_dispatch:
     inputs:
       env_name:
@@ -8,25 +8,24 @@ on:
         required: true
         type: string
 
+# Cancel any in-progress run for the same PR/ref when a newer push lands,
+# so rapid consecutive pushes don't pile up runs on stale commits.
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
+      # actions:read is needed by dorny/test-reporter to look up the
+      # workflow run it's attaching the check to.
+      actions: read
       pull-requests: read
-      # dorny/test-reporter creates a check run on the deployment SHA,
-      # which needs checks:write.
+      # dorny/test-reporter creates a check run on the head SHA, which
+      # needs checks:write.
       checks: write
-    # Two ways in:
-    #   - deployment_status: fired automatically by Railway on a successful
-    #     transient preview-env deployment
-    #   - workflow_dispatch: manual retrigger against an existing Railway env,
-    #     useful for e2e-only changes that don't cause a Railway rebuild
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.deployment_status.state == 'success' &&
-       github.event.deployment.transient_environment == true &&
-       github.event.deployment.creator.login == 'railway-app[bot]')
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v5
@@ -37,16 +36,210 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: npx playwright install --with-deps chromium
 
+      - name: Resolve target SHA
+        id: sha
+        run: |
+          case "${{ github.event_name }}" in
+            pull_request)
+              echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+              ;;
+            workflow_dispatch)
+              echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Unexpected event: ${{ github.event_name }}"
+              exit 1
+              ;;
+          esac
+
+      # ------------------------------------------------------------
+      # KNOWN LIMITATION — possible silent failure
+      # ------------------------------------------------------------
+      # The step below decides whether to wait for a fresh Railway
+      # rebuild OR to fall back to the PR branch's existing preview
+      # env by *observing* what Railway actually does: "did a
+      # deployment record for this SHA appear within 20 seconds?" If
+      # yes, wait for it to finish; if no, assume Railway correctly
+      # decided not to rebuild and fall back to the newest preview
+      # on the branch.
+      #
+      # This is a HEURISTIC, not a guarantee. If Railway's webhook /
+      # deployment-API pipeline is delayed, broken, or silently drops
+      # an event — or if Railway genuinely should have rebuilt but
+      # didn't due to a bug in their watchPatterns matcher — the
+      # 20-second grace window will conclude "no rebuild coming" and
+      # fall back to the previous preview. Tests then run against a
+      # stale image and silently pass even though the new code was
+      # never actually exercised. A regressing push is especially
+      # dangerous: broken code goes green because the old env still
+      # works. The failure mode is SILENT and BIASED TOWARD PASSING.
+      #
+      # The only fully-correct fix is to re-derive Railway's rebuild
+      # decision ourselves by parsing each service's watchPatterns
+      # from railway.toml and matching the `git diff` against them,
+      # so we can definitively say "we expect a rebuild" or "we
+      # don't" without observing Railway at all. Tracked in:
+      #
+      #   https://github.com/hypercerts-org/ePDS/issues/57
+      #
+      # Until that lands, the 20-second window is the honest
+      # trade-off: correct enough in the common case, explicitly
+      # documented in the failure mode.
+      # ------------------------------------------------------------
+      - name: Find Railway preview deployment
+        # Skipped on workflow_dispatch, which is the manual-retrigger
+        # escape hatch: the caller supplies env_name and is responsible
+        # for knowing the Railway env is already up.
+        if: github.event_name != 'workflow_dispatch'
+        id: wait-deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.sha.outputs.sha }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Pick a Railway preview deployment to test against.
+          #
+          # Preferred: a deployment on *this* SHA. If the current push
+          # touched a path in Railway's watchPatterns, Railway will
+          # rebuild and such a deployment will exist (eventually) —
+          # poll for it to reach success so we test against the freshly
+          # built image.
+          #
+          # Fallback: the latest successful Railway preview deployment
+          # on the PR's head branch, whatever SHA it's on. This is the
+          # env currently running for this PR, and if the current push
+          # doesn't touch a watched path the PR's Railway env is still
+          # the right thing to test against — nothing changed from
+          # Railway's perspective, so the last successful deploy is
+          # still live and accurate. This replicates the implicit
+          # behavior of the previous deployment_status-triggered
+          # setup, where a non-Railway-rebuilding push simply didn't
+          # re-run e2e at all.
+          #
+          # Railway preview deploys on this repo typically land in ~1
+          # minute; a 3-minute cap (36 × 5s) is 3× headroom. The grace
+          # period before giving up on the SHA-specific lookup is 20s,
+          # which is well beyond the typical latency between a GHA
+          # push event and Railway's first deployment record appearing.
+
+          GRACE_ATTEMPTS=4   # 4 × 5s = 20 seconds
+          MAX_ATTEMPTS=36    # 36 × 5s = 3 minutes
+
+          find_deploy_for_sha() {
+            gh api "repos/${{ github.repository }}/deployments?sha=$SHA" \
+              --jq 'map(select(.creator.login == "railway-app[bot]" and .transient_environment == true))[0]'
+          }
+
+          latest_state_of() {
+            local id=$1
+            gh api "repos/${{ github.repository }}/deployments/$id/statuses" \
+              --jq '.[0].state // "pending"'
+          }
+
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            deploy_json=$(find_deploy_for_sha)
+            if [ -z "$deploy_json" ] || [ "$deploy_json" = "null" ]; then
+              state=none
+            else
+              deploy_id=$(echo "$deploy_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+              state=$(latest_state_of "$deploy_id")
+            fi
+            echo "  attempt $i/$MAX_ATTEMPTS (SHA $SHA): state=$state"
+
+            if [ "$state" = "success" ]; then
+              env_name=$(echo "$deploy_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["environment"])')
+              echo "✓ Railway deployment on this SHA is ready — environment: $env_name"
+              echo "env_name=$env_name" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if [ "$state" = "failure" ] || [ "$state" = "error" ]; then
+              echo "::error::Railway deployment for $SHA failed (state=$state)"
+              exit 1
+            fi
+
+            # Grace period: if no Railway deployment exists at all for
+            # this SHA after 20s, the push doesn't touch any watched
+            # path. Fall back to the NEWEST Railway preview on this
+            # branch (regardless of SHA). Strict policy: we only accept
+            # the newest one. If the newest is a failure or in-progress,
+            # we don't walk further back to find an older success,
+            # because that would mask a genuinely broken preview env.
+            if [ "$state" = "none" ] && [ "$i" -ge "$GRACE_ATTEMPTS" ]; then
+              echo "::notice::No Railway preview deployment for $SHA after ${GRACE_ATTEMPTS}0s — push doesn't touch any watched path. Falling back to newest preview on branch '$BRANCH'."
+              newest=$(
+                gh api "repos/${{ github.repository }}/deployments?ref=$BRANCH" \
+                  --jq 'map(select(.creator.login == "railway-app[bot]" and .transient_environment == true))[0]'
+              )
+              if [ -z "$newest" ] || [ "$newest" = "null" ]; then
+                echo "::error::No Railway preview deployments exist for branch '$BRANCH' at all. Is this a brand-new PR whose first deploy hasn't landed yet? Push a change under one of Railway's watchPatterns to force a fresh build, or retrigger manually via workflow_dispatch once Railway's preview env is up."
+                exit 1
+              fi
+              newest_id=$(echo "$newest" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+              newest_sha=$(echo "$newest" | python3 -c 'import sys,json;print(json.load(sys.stdin)["sha"])')
+              newest_state=$(latest_state_of "$newest_id")
+              echo "  newest preview on branch: id=$newest_id sha=${newest_sha:0:12} state=$newest_state"
+
+              case "$newest_state" in
+                success)
+                  env_name=$(echo "$newest" | python3 -c 'import sys,json;print(json.load(sys.stdin)["environment"])')
+                  echo "✓ Using existing Railway deployment — environment: $env_name (sha ${newest_sha:0:12})"
+                  echo "env_name=$env_name" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+                in_progress|queued|pending)
+                  # The newest preview on the branch is still being
+                  # built. That's a deploy from an earlier push that
+                  # hasn't finished yet. Wait for it inside the
+                  # remaining outer-loop budget rather than falling
+                  # through to older successes — if we used an older
+                  # one we'd risk returning stale results for ~a
+                  # minute while the fresh build is imminently ready.
+                  echo "::notice::Newest Railway preview on branch '$BRANCH' (sha ${newest_sha:0:12}) is still $newest_state. Continuing to wait within the 3-minute budget."
+                  # Don't exit — fall out of the if-block, sleep, and
+                  # re-enter the outer loop. Next iteration will find
+                  # no SHA-specific deploy (still), hit the grace
+                  # period again (already past), and re-check the
+                  # newest branch preview. If it flips to success,
+                  # we'll use it; if to failure, we'll hard-fail; if
+                  # it stays in_progress until the 3-minute cap,
+                  # we'll hit the outer timeout.
+                  ;;
+                failure|error)
+                  echo "::error::Newest Railway preview on branch '$BRANCH' (sha ${newest_sha:0:12}) is in '$newest_state' state. The PR's preview env is broken — fix the underlying failure or retrigger a Railway build. Refusing to fall back to an older successful deploy because that would silently hide the broken state."
+                  exit 1
+                  ;;
+                inactive)
+                  # GitHub marks deployments 'inactive' when a newer
+                  # one supersedes them for the same environment. The
+                  # newest entry being 'inactive' is unusual — it
+                  # could mean Railway's webhook-to-API plumbing is
+                  # lagging. Fail rather than guess.
+                  echo "::error::Newest Railway preview on branch '$BRANCH' is 'inactive', which is unexpected for the most recent deployment. Check Railway's deployment history for this branch and retry."
+                  exit 1
+                  ;;
+                *)
+                  echo "::error::Newest Railway preview on branch '$BRANCH' is in unknown state '$newest_state'. Refusing to proceed."
+                  exit 1
+                  ;;
+              esac
+            fi
+
+            sleep 5
+          done
+          echo "::error::Railway deployment for $SHA did not reach success within 3 minutes."
+          exit 1
+
       - name: Derive service URLs
         id: urls
         env:
-          # "ePDS / ePDS-pr-48" for normal envs, "ePDS / pr-3897f1-47" when
-          # Railway falls back to its collision-avoidance naming during a
-          # close/reopen or force-push that hits the env-cleanup window.
+          # On workflow_dispatch we read the env name from inputs; on
+          # pull_request we read it from the wait-deploy step's output,
+          # which is the Railway deployment's `environment` field
+          # ("ePDS / ePDS-pr-48" or the collision-avoidance form
+          # "ePDS / pr-3897f1-47").
           # See: https://station.railway.com/questions/pr-environment-name-format-change-causin-9aaa904f
-          # On manual workflow_dispatch we read the env name from inputs;
-          # on deployment_status we read it from the webhook payload.
-          FULL_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.env_name || github.event.deployment.environment }}
+          FULL_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.env_name || steps.wait-deploy.outputs.env_name }}
         run: |
           # Railway's autogenerated *.up.railway.app domains are built as
           # <service-slug>-<env-name>.up.railway.app, with both parts lowercased
