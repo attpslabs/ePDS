@@ -1,6 +1,14 @@
 name: E2E tests
 on:
   pull_request:
+  # Post-merge backstop: run e2e against the persistent pr-base Railway
+  # env after every commit to main. pr-base has the same preview-style
+  # layout (including Mailpit) so the existing test suite works against
+  # it unchanged. This catches regressions that slipped through PR e2e
+  # due to the silent-failure scenarios documented on the
+  # "Find Railway preview deployment" step below.
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       env_name:
@@ -43,7 +51,7 @@ jobs:
             pull_request)
               echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
               ;;
-            workflow_dispatch)
+            push|workflow_dispatch)
               echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
               ;;
             *)
@@ -53,26 +61,35 @@ jobs:
           esac
 
       # ------------------------------------------------------------
-      # KNOWN LIMITATION — possible silent failure
+      # KNOWN LIMITATION — possible silent failure on pull_request
       # ------------------------------------------------------------
       # The step below decides whether to wait for a fresh Railway
-      # rebuild OR to fall back to the PR branch's existing preview
-      # env by *observing* what Railway actually does: "did a
-      # deployment record for this SHA appear within 20 seconds?" If
-      # yes, wait for it to finish; if no, assume Railway correctly
-      # decided not to rebuild and fall back to the newest preview
-      # on the branch.
+      # rebuild OR to fall back to an existing deployment by
+      # *observing* what Railway actually does: "did a deployment
+      # record for this SHA appear within 20 seconds?" If yes, wait
+      # for it to finish; if no, assume Railway correctly decided not
+      # to rebuild and fall back to the newest existing deployment in
+      # the target environment.
       #
       # This is a HEURISTIC, not a guarantee. If Railway's webhook /
       # deployment-API pipeline is delayed, broken, or silently drops
       # an event — or if Railway genuinely should have rebuilt but
       # didn't due to a bug in their watchPatterns matcher — the
       # 20-second grace window will conclude "no rebuild coming" and
-      # fall back to the previous preview. Tests then run against a
+      # fall back to a previous deployment. Tests then run against a
       # stale image and silently pass even though the new code was
       # never actually exercised. A regressing push is especially
       # dangerous: broken code goes green because the old env still
       # works. The failure mode is SILENT and BIASED TOWARD PASSING.
+      #
+      # Blast radius is reduced (but not eliminated) by the post-merge
+      # backstop run on push-to-main, which re-tests the merged code
+      # against the persistent pr-base Railway env. If a PR's e2e
+      # silently passed against a stale preview and a regression
+      # landed, the post-merge run catches it — unless the same
+      # silent-failure scenario recurs on the merge commit, which is
+      # possible if Railway's pipeline is broadly broken rather than
+      # intermittently flaky.
       #
       # The only fully-correct fix is to re-derive Railway's rebuild
       # decision ourselves by parsing each service's watchPatterns
@@ -86,7 +103,7 @@ jobs:
       # trade-off: correct enough in the common case, explicitly
       # documented in the failure mode.
       # ------------------------------------------------------------
-      - name: Find Railway preview deployment
+      - name: Find Railway deployment
         # Skipped on workflow_dispatch, which is the manual-retrigger
         # escape hatch: the caller supplies env_name and is responsible
         # for knowing the Railway env is already up.
@@ -95,9 +112,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.sha.outputs.sha }}
-          BRANCH: ${{ github.event.pull_request.head.ref }}
+          # Only set on pull_request — unused on push.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT: ${{ github.event_name }}
         run: |
-          # Pick a Railway preview deployment to test against.
+          # Pick a Railway deployment to test against.
           #
           # Preferred: a deployment on *this* SHA. If the current push
           # touched a path in Railway's watchPatterns, Railway will
@@ -105,29 +124,80 @@ jobs:
           # poll for it to reach success so we test against the freshly
           # built image.
           #
-          # Fallback: the latest successful Railway preview deployment
-          # on the PR's head branch, whatever SHA it's on. This is the
-          # env currently running for this PR, and if the current push
-          # doesn't touch a watched path the PR's Railway env is still
-          # the right thing to test against — nothing changed from
-          # Railway's perspective, so the last successful deploy is
-          # still live and accurate. This replicates the implicit
-          # behavior of the previous deployment_status-triggered
-          # setup, where a non-Railway-rebuilding push simply didn't
-          # re-run e2e at all.
+          # Fallback: the newest Railway deployment in the target
+          # environment, regardless of SHA. That's whatever env is
+          # currently running for this PR (pull_request) or is
+          # currently running on main (push). If the current commit
+          # doesn't touch a watched path, nothing changed from
+          # Railway's perspective and the last deployment is still
+          # accurate.
           #
-          # Railway preview deploys on this repo typically land in ~1
-          # minute; a 3-minute cap (36 × 5s) is 3× headroom. The grace
-          # period before giving up on the SHA-specific lookup is 20s,
-          # which is well beyond the typical latency between a GHA
-          # push event and Railway's first deployment record appearing.
+          # The filter differs by event type:
+          #   - pull_request: transient preview env for this PR.
+          #     Railway uses two name formats ("ePDS / ePDS-pr-55"
+          #     normally, "ePDS / pr-3897f1-55" on collision), both
+          #     ending in "-<PR number>", so we match by suffix.
+          #   - push: the persistent pr-base env, which is the
+          #     post-merge backstop. Filter by exact environment name.
+          #
+          # NOTE: the GitHub deployments API's `ref` query parameter
+          # matches the deployment's `ref` field, which Railway
+          # populates with the commit SHA, NOT the branch name —
+          # so `?ref=<branch-name>` silently returns zero results.
+          # Instead we use the `environment` query parameter (exact
+          # match only) for the push case, and for pull_request we
+          # query by SHA in the preferred path and rely on the
+          # environment-name filter in the fallback path.
+          #
+          # Strict fallback policy applies to both: only the NEWEST
+          # deployment counts. If it's failure/error/inactive we
+          # hard-fail rather than walking back to find an older
+          # success, because that would silently mask a broken env.
+          #
+          # Railway deploys on this repo typically land in ~1 minute;
+          # a 3-minute cap (36 × 5s) is 3× headroom. The grace period
+          # before giving up on the SHA-specific lookup is 20s, which
+          # is well beyond the typical latency between a GHA push
+          # event and Railway's first deployment record appearing.
 
           GRACE_ATTEMPTS=4   # 4 × 5s = 20 seconds
           MAX_ATTEMPTS=36    # 36 × 5s = 3 minutes
 
+          # Filters that select deployments matching the target env
+          # for the current event.
+          case "$EVENT" in
+            pull_request)
+              # Match any Railway transient env whose name ends in
+              # "-<PR number>". Covers both "ePDS / ePDS-pr-55" and
+              # "ePDS / pr-3897f1-55".
+              SHA_FILTER=".creator.login == \"railway-app[bot]\" and .transient_environment == true and (.environment | endswith(\"-$PR_NUMBER\"))"
+              FALLBACK_URL="repos/${{ github.repository }}/deployments?per_page=100"
+              FALLBACK_FILTER="$SHA_FILTER"
+              TARGET_DESC="PR #$PR_NUMBER preview"
+              ;;
+            push)
+              # Persistent pr-base env. The `environment` query parameter
+              # is an exact-match filter — much more efficient than
+              # pulling down all deployments and filtering client-side.
+              SHA_FILTER='.creator.login == "railway-app[bot]" and .environment == "ePDS / pr-base"'
+              FALLBACK_URL="repos/${{ github.repository }}/deployments?environment=ePDS%20%2F%20pr-base&per_page=10"
+              FALLBACK_FILTER='.creator.login == "railway-app[bot]"'
+              TARGET_DESC="pr-base env"
+              ;;
+            *)
+              echo "::error::Unexpected event: $EVENT"
+              exit 1
+              ;;
+          esac
+
           find_deploy_for_sha() {
             gh api "repos/${{ github.repository }}/deployments?sha=$SHA" \
-              --jq 'map(select(.creator.login == "railway-app[bot]" and .transient_environment == true))[0]'
+              --jq "map(select($SHA_FILTER))[0]"
+          }
+
+          find_newest_deploy() {
+            gh api "$FALLBACK_URL" \
+              --jq "map(select($FALLBACK_FILTER))[0]"
           }
 
           latest_state_of() {
@@ -144,7 +214,7 @@ jobs:
               deploy_id=$(echo "$deploy_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
               state=$(latest_state_of "$deploy_id")
             fi
-            echo "  attempt $i/$MAX_ATTEMPTS (SHA $SHA): state=$state"
+            echo "  attempt $i/$MAX_ATTEMPTS (SHA $SHA, $TARGET_DESC): state=$state"
 
             if [ "$state" = "success" ]; then
               env_name=$(echo "$deploy_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["environment"])')
@@ -160,25 +230,22 @@ jobs:
 
             # Grace period: if no Railway deployment exists at all for
             # this SHA after 20s, the push doesn't touch any watched
-            # path. Fall back to the NEWEST Railway preview on this
-            # branch (regardless of SHA). Strict policy: we only accept
-            # the newest one. If the newest is a failure or in-progress,
-            # we don't walk further back to find an older success,
-            # because that would mask a genuinely broken preview env.
+            # path. Fall back to the NEWEST deployment in the target
+            # environment. Strict policy: we only accept the newest
+            # one. If it's a failure or unexpected state, hard-fail
+            # rather than walking back to find an older success,
+            # because that would mask a genuinely broken env.
             if [ "$state" = "none" ] && [ "$i" -ge "$GRACE_ATTEMPTS" ]; then
-              echo "::notice::No Railway preview deployment for $SHA after ${GRACE_ATTEMPTS}0s — push doesn't touch any watched path. Falling back to newest preview on branch '$BRANCH'."
-              newest=$(
-                gh api "repos/${{ github.repository }}/deployments?ref=$BRANCH" \
-                  --jq 'map(select(.creator.login == "railway-app[bot]" and .transient_environment == true))[0]'
-              )
+              echo "::notice::No Railway deployment for $SHA after ${GRACE_ATTEMPTS}0s — push doesn't touch any watched path. Falling back to newest deployment in $TARGET_DESC."
+              newest=$(find_newest_deploy)
               if [ -z "$newest" ] || [ "$newest" = "null" ]; then
-                echo "::error::No Railway preview deployments exist for branch '$BRANCH' at all. Is this a brand-new PR whose first deploy hasn't landed yet? Push a change under one of Railway's watchPatterns to force a fresh build, or retrigger manually via workflow_dispatch once Railway's preview env is up."
+                echo "::error::No Railway deployments exist for $TARGET_DESC at all. Is this a brand-new context whose first deploy hasn't landed yet? Push a change under one of Railway's watchPatterns to force a fresh build, or retrigger manually via workflow_dispatch once Railway's env is up."
                 exit 1
               fi
               newest_id=$(echo "$newest" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
               newest_sha=$(echo "$newest" | python3 -c 'import sys,json;print(json.load(sys.stdin)["sha"])')
               newest_state=$(latest_state_of "$newest_id")
-              echo "  newest preview on branch: id=$newest_id sha=${newest_sha:0:12} state=$newest_state"
+              echo "  newest deployment in $TARGET_DESC: id=$newest_id sha=${newest_sha:0:12} state=$newest_state"
 
               case "$newest_state" in
                 success)
@@ -188,25 +255,24 @@ jobs:
                   exit 0
                   ;;
                 in_progress|queued|pending)
-                  # The newest preview on the branch is still being
-                  # built. That's a deploy from an earlier push that
-                  # hasn't finished yet. Wait for it inside the
+                  # The newest deployment in the target env is still
+                  # being built. That's a deploy from an earlier push
+                  # that hasn't finished yet. Wait for it inside the
                   # remaining outer-loop budget rather than falling
                   # through to older successes — if we used an older
                   # one we'd risk returning stale results for ~a
                   # minute while the fresh build is imminently ready.
-                  echo "::notice::Newest Railway preview on branch '$BRANCH' (sha ${newest_sha:0:12}) is still $newest_state. Continuing to wait within the 3-minute budget."
+                  echo "::notice::Newest Railway deployment in $TARGET_DESC (sha ${newest_sha:0:12}) is still $newest_state. Continuing to wait within the 3-minute budget."
                   # Don't exit — fall out of the if-block, sleep, and
                   # re-enter the outer loop. Next iteration will find
                   # no SHA-specific deploy (still), hit the grace
-                  # period again (already past), and re-check the
-                  # newest branch preview. If it flips to success,
-                  # we'll use it; if to failure, we'll hard-fail; if
-                  # it stays in_progress until the 3-minute cap,
-                  # we'll hit the outer timeout.
+                  # period again (already past), and re-check. If it
+                  # flips to success, we'll use it; if to failure,
+                  # we'll hard-fail; if it stays in_progress until
+                  # the 3-minute cap, we'll hit the outer timeout.
                   ;;
                 failure|error)
-                  echo "::error::Newest Railway preview on branch '$BRANCH' (sha ${newest_sha:0:12}) is in '$newest_state' state. The PR's preview env is broken — fix the underlying failure or retrigger a Railway build. Refusing to fall back to an older successful deploy because that would silently hide the broken state."
+                  echo "::error::Newest Railway deployment in $TARGET_DESC (sha ${newest_sha:0:12}) is in '$newest_state' state. The env is broken — fix the underlying failure or retrigger a Railway build. Refusing to fall back to an older successful deploy because that would silently hide the broken state."
                   exit 1
                   ;;
                 inactive)
@@ -215,11 +281,11 @@ jobs:
                   # newest entry being 'inactive' is unusual — it
                   # could mean Railway's webhook-to-API plumbing is
                   # lagging. Fail rather than guess.
-                  echo "::error::Newest Railway preview on branch '$BRANCH' is 'inactive', which is unexpected for the most recent deployment. Check Railway's deployment history for this branch and retry."
+                  echo "::error::Newest Railway deployment in $TARGET_DESC is 'inactive', which is unexpected for the most recent deployment. Check Railway's deployment history and retry."
                   exit 1
                   ;;
                 *)
-                  echo "::error::Newest Railway preview on branch '$BRANCH' is in unknown state '$newest_state'. Refusing to proceed."
+                  echo "::error::Newest Railway deployment in $TARGET_DESC is in unknown state '$newest_state'. Refusing to proceed."
                   exit 1
                   ;;
               esac
