@@ -1,5 +1,84 @@
 # ePDS
 
+## 0.2.2
+
+### Who should read this release
+
+- **Everyone (end users, client app developers, operators):**
+  - [The permissions shown on the sign-in approval screen now match what the app actually asked for.](#v0.2.2-the-permissions-shown-on-the-sign-in-approval-screen-now)
+- **Operators also:**
+  - [Sign-in no longer fails when the login service and your data server share a domain name.](#v0.2.2-sign-in-no-longer-fails-when-the-login-service-and-your)
+
+### Patch Changes
+
+- <a id="v0.2.2-the-permissions-shown-on-the-sign-in-approval-screen-now"></a> [#21](https://github.com/hypercerts-org/ePDS/pull/21) [`10287ca`](https://github.com/hypercerts-org/ePDS/commit/10287cad14478ef3a877abdf0b581342ce7842c8) Thanks [@aspiers](https://github.com/aspiers)! - The permissions shown on the sign-in approval screen now match what the app actually asked for.
+
+  **Affects:** End users, Client app developers, Operators
+
+  **End users:** When you sign in to a third-party app through ePDS and
+  are asked to approve what the app can do with your account, the list
+  you see now reflects the permissions that particular app actually
+  requested. Previously the screen always showed the same hard-coded
+  list ("Read and write posts", "Access your profile", "Manage your
+  follows") no matter which app you were signing in to, which was
+  misleading. The approval screen itself also now looks and behaves
+  like the standard AT Protocol consent screen used elsewhere in the
+  ecosystem.
+
+  **Client app developers:** The consent screen rendered at
+  `/oauth/authorize` is now the stock `@atproto/oauth-provider`
+  `consent-view.tsx`, driven by the real `scope` / `permissionSets`
+  your client requests. The previous auth-service implementation
+  ignored the requested scopes entirely. After OTP verification and
+  (for new users) account creation, `epds-callback` now binds the
+  device session via `upsertDeviceAccount()` and redirects through
+  `/oauth/authorize`, so the upstream `oauthMiddleware` runs
+  `provider.authorize()` — including `checkConsentRequired()` — against
+  the actual request. Clients that only need scopes the user has
+  already approved will now be auto-approved instead of being shown a
+  redundant consent screen. Support for branding the consent screen is
+  currently being worked on.
+
+  **Operators:** No configuration changes are required. Consent state
+  now lives in the upstream provider's `authorizedClients` tracking. The
+  `client_logins` table is no longer used but is left in place (not
+  dropped) to avoid breaking rollbacks in case they were ever needed.
+
+- <a id="v0.2.2-sign-in-no-longer-fails-when-the-login-service-and-your"></a> [#65](https://github.com/hypercerts-org/ePDS/pull/65) [`313c071`](https://github.com/hypercerts-org/ePDS/commit/313c07176ac04ae6f517f18cfe95cf15af1d0812) Thanks [@aspiers](https://github.com/aspiers)! - Sign-in no longer fails when the login service and your data server share a domain name.
+
+  **Affects:** Operators
+
+  **Operators:** The upstream `@atproto/oauth-provider` rejects `sec-fetch-site: same-site`
+  on `GET /oauth/authorize`. This caused a `400 Forbidden sec-fetch-site header` error on
+  deployments where the auth service and PDS share a registrable domain (e.g.
+  `auth.epds1.test.certified.app` and `epds1.test.certified.app`). Browsers send `same-site`
+  on the 303 redirect chain from the auth subdomain to the PDS, and the upstream code does
+  not allow it.
+
+  pds-core now includes middleware that rewrites `sec-fetch-site: same-site` to `same-origin`
+  on `GET /oauth/authorize` when the request originates from the trusted auth subdomain. No
+  configuration changes are needed.
+
+  Additionally, DB migration v9 (which previously dropped the `client_logins` table) is now a
+  no-op. The table is no longer used but is kept in place to avoid breaking emergency rollbacks
+  to older code that still references it.
+
+  This bug was missed by the comprehensive E2E test suite due to an
+  unfortunate combination of quirks:
+  1. The upstream ATProto PDS does not support `sec-fetch-site: same-site`, marked as a
+     [`@TODO`](https://github.com/bluesky-social/atproto/blob/2a9221d244a0821490458785d70d100a6943ea91/packages/oauth/oauth-provider/src/router/create-authorization-page-middleware.ts#L75-L77)
+     in the source. Stock ATProto never encounters `same-site` because the PDS serves its own
+     login UI on the same origin.
+  2. Railway does not allow any control over generated domains for PR preview environments.
+     Each service gets a flat `*.up.railway.app` subdomain, and `up.railway.app` is on the
+     Public Suffix List — so cross-service requests are `cross-site` (allowed), never
+     `same-site`. This creates a small but ultimately significant difference in DNS topology
+     from Certified infrastructure where all services share a registrable domain.
+  3. The deliberate introduction (in PR [#21](https://github.com/hypercerts-org/ePDS/issues/21)) of a double redirect from
+     `auth-service/auth/complete` to `pds-core/oauth/epds-callback` to
+     `pds-core/oauth/authorize`, which sends the browser through a cross-origin hop on the
+     same site — the exact pattern the upstream validation rejects.
+
 ## 0.2.1
 
 ### Who should read this release
