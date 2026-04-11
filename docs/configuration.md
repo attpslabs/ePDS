@@ -36,7 +36,7 @@ marked `[shared]` in the per-package `.env.example` files.
 
 | Variable                                    | Description                                                                                      |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `PDS_PORT`                                  | Port for PDS Core (default `3000`)                                                               |
+| `PDS_PORT`                                  | Port for PDS Core. Resolved as `PDS_PORT` → `PORT` → `3000`, so platforms that inject `PORT` (e.g. Railway) work without a service-specific override. |
 | `PDS_DATA_DIRECTORY`                        | Path to data directory (default `/data`)                                                         |
 | `PDS_DID_PLC_URL`                           | AT Protocol PLC directory URL (default `https://plc.directory`)                                  |
 | `PDS_BSKY_APP_VIEW_URL`                     | Bluesky app view URL (default `https://api.bsky.app`)                                            |
@@ -64,7 +64,7 @@ Optional PDS email variables:
 | Variable              | Description                                                                                                                                                                                                 |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AUTH_HOSTNAME`       | Auth subdomain (e.g. `auth.pds.example.com`) — must be a subdomain of `PDS_HOSTNAME`                                                                                                                        |
-| `AUTH_PORT`           | Port for Auth Service (default `3001`)                                                                                                                                                                      |
+| `AUTH_PORT`           | Port for Auth Service. Resolved as `AUTH_PORT` → `PORT` → `3001`, so platforms that inject `PORT` (e.g. Railway) work without a service-specific override.                                                  |
 | `AUTH_SESSION_SECRET` | Session secret — generate with `openssl rand -hex 32`                                                                                                                                                       |
 | `AUTH_CSRF_SECRET`    | CSRF secret — generate with `openssl rand -hex 32`                                                                                                                                                          |
 | `PDS_INTERNAL_URL`    | **Required.** Internal URL for auth→PDS calls. Docker: `http://core:3000`; Railway: `http://<service>.railway.internal:3000`; local dev: `http://localhost:3000`. Auth service crashes at startup if unset. |
@@ -75,6 +75,19 @@ Optional PDS email variables:
 | -------------------------- | ---------------------------------------------------------- |
 | `EPDS_LINK_EXPIRY_MINUTES` | Link expiry in minutes (default `10`)                      |
 | `EPDS_LINK_BASE_URL`       | Base URL for verification links — must match AUTH_HOSTNAME |
+
+### OTP code
+
+| Variable      | Description                                                                                                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OTP_LENGTH`  | Number of characters in the email verification code. Integer in the range 4–12 (default `8`). Values outside the range cause the auth service to fail on startup.                 |
+| `OTP_CHARSET` | Character set for the verification code: `numeric` (digits only, default) or `alphanumeric` (uppercase A–Z plus 0–9). Alphanumeric codes have higher entropy but lose the numeric on-screen keyboard. |
+
+### Handle picker
+
+| Variable                   | Description                                                                                                                                                                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EPDS_DEFAULT_HANDLE_MODE` | Default handle assignment mode for new user signups when neither the OAuth `epds_handle_mode` query parameter nor the client metadata field is set. One of `picker`, `random`, or `picker-with-random` (default). See [tutorial.md](tutorial.md) for the full precedence rules and per-client overrides. |
 
 ### Better Auth session
 
