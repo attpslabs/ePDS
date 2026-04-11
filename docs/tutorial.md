@@ -229,11 +229,11 @@ an `epds_handle_mode` field to your client metadata:
 
 Accepted values (case-sensitive):
 
-| Value                | Behaviour                                                                  |
-| -------------------- | -------------------------------------------------------------------------- |
-| `picker`             | Always show the handle picker. No "generate random" button.                |
-| `random`             | Always assign a random handle. No picker shown (pre-0.2.0 behaviour).      |
-| `picker-with-random` | Show the picker with a "generate random" button (this is the default).    |
+| Value                | Behaviour                                                              |
+| -------------------- | ---------------------------------------------------------------------- |
+| `picker`             | Always show the handle picker. No "generate random" button.            |
+| `random`             | Always assign a random handle. No picker shown (pre-0.2.0 behaviour).  |
+| `picker-with-random` | Show the picker with a "generate random" button (this is the default). |
 
 The mode is resolved per request with the following precedence — first
 match wins:
@@ -348,11 +348,11 @@ function derToRaw(der: Buffer): Buffer {
 In Flow 1 your app passes an identifier for the user to ePDS in the
 OAuth `login_hint` parameter. ePDS accepts three forms:
 
-| Form   | Example                   | When to use                                                                                       |
-| ------ | ------------------------- | ------------------------------------------------------------------------------------------------- |
-| Email  | `alice@example.com`       | Your app collects email addresses (e.g. via a sign-in form).                                      |
-| Handle | `alice.pds.example.com`   | Your app already knows the user's AT Protocol handle (e.g. from a previous session, or a follow). |
-| DID    | `did:plc:abc123…`         | Your app stores users by DID and never sees their handle.                                         |
+| Form   | Example                 | When to use                                                                                       |
+| ------ | ----------------------- | ------------------------------------------------------------------------------------------------- |
+| Email  | `alice@example.com`     | Your app collects email addresses (e.g. via a sign-in form).                                      |
+| Handle | `alice.pds.example.com` | Your app already knows the user's AT Protocol handle (e.g. from a previous session, or a follow). |
+| DID    | `did:plc:abc123…`       | Your app stores users by DID and never sees their handle.                                         |
 
 All three behave the same way from the client's perspective: ePDS sends
 the OTP to the account's email address and shows the code-entry screen
