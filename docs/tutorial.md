@@ -244,9 +244,12 @@ match wins:
 4. Built-in default: `picker-with-random`
 
 If you need to override per request — e.g. for a specific signup
-campaign — append `?epds_handle_mode=picker` (or any other accepted
-value) to the `/oauth/authorize` URL you redirect the user to. Unknown or
-invalid values are silently ignored and fall through to the next source.
+campaign — add `epds_handle_mode=picker` (or any other accepted value) as
+an additional query parameter when you build the `/oauth/authorize` URL
+in [_Redirecting the user to ePDS_](#redirecting-the-user-to-epds) below.
+The `/oauth/authorize` URL already carries `client_id` and `request_uri`,
+so use `&epds_handle_mode=...`, not `?`. Unknown or invalid values are
+silently ignored and fall through to the next source.
 
 ### Security helpers
 

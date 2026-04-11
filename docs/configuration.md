@@ -85,9 +85,9 @@ Optional PDS email variables:
 
 ### Handle picker
 
-| Variable                   | Description                                                                                                                                                                                                                                                                                              |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EPDS_DEFAULT_HANDLE_MODE` | Default handle assignment mode for new user signups when neither the OAuth `epds_handle_mode` query parameter nor the client metadata field is set. One of `picker`, `random`, or `picker-with-random` (default). See [tutorial.md](tutorial.md) for the full precedence rules and per-client overrides. |
+| Variable                   | Description                                                                                                                                                                                                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `EPDS_DEFAULT_HANDLE_MODE` | Default handle assignment mode for new user signups when neither the OAuth `epds_handle_mode` query parameter nor the client metadata field is set. One of `picker`, `random`, or `picker-with-random` (default: `picker-with-random`). See [tutorial.md](tutorial.md) for the full precedence rules and per-client overrides. |
 
 ### Better Auth session
 
