@@ -22,9 +22,13 @@ your app, and your app exchanges that redirect for a token.
 
 ## Flow 1 — App has its own email form
 
-1. User enters email in your app and clicks "Sign in"
-2. Your login handler registers the login attempt with ePDS (passing the email)
-3. Your app redirects the user's browser to the ePDS auth page (with the email)
+1. User enters email in your app and clicks "Sign in" — or your app
+   already knows the user's handle or DID from a previous session (see
+   [Identifying the user](#identifying-the-user))
+2. Your login handler registers the login attempt with ePDS (passing the
+   identifier as `login_hint`)
+3. Your app redirects the user's browser to the ePDS auth page (with the
+   same `login_hint`)
 4. ePDS immediately sends the OTP and shows the code-entry screen
 5. User reads the 8-digit code from their email and submits it
 6. ePDS verifies the code
@@ -211,6 +215,42 @@ placeholder. Supported template variables:
 | `{{#is_new_user}}...{{/is_new_user}}` | Shown only on first sign-up               |
 | `{{^is_new_user}}...{{/is_new_user}}` | Shown only on subsequent sign-ins         |
 
+#### Optional: control the handle picker
+
+When a new user signs up through your app, ePDS shows them a handle picker
+by default. You can override which variant of the picker is shown by adding
+an `epds_handle_mode` field to your client metadata:
+
+```json
+{
+  "epds_handle_mode": "picker"
+}
+```
+
+Accepted values (case-sensitive):
+
+| Value                | Behaviour                                                              |
+| -------------------- | ---------------------------------------------------------------------- |
+| `picker`             | Always show the handle picker. No "generate random" button.            |
+| `random`             | Always assign a random handle. No picker shown (pre-0.2.0 behaviour).  |
+| `picker-with-random` | Show the picker with a "generate random" button (this is the default). |
+
+The mode is resolved per request with the following precedence — first
+match wins:
+
+1. `epds_handle_mode` query parameter on the `/oauth/authorize` URL
+2. `epds_handle_mode` field in your client metadata JSON
+3. `EPDS_DEFAULT_HANDLE_MODE` environment variable on the auth service
+4. Built-in default: `picker-with-random`
+
+If you need to override per request — e.g. for a specific signup
+campaign — add `epds_handle_mode=picker` (or any other accepted value) as
+an additional query parameter when you build the `/oauth/authorize` URL
+in [_Redirecting the user to ePDS_](#redirecting-the-user-to-epds) below.
+The `/oauth/authorize` URL already carries `client_id` and `request_uri`,
+so use `&epds_handle_mode=...`, not `?`. Unknown or invalid values are
+silently ignored and fall through to the next source.
+
 ### Security helpers
 
 ePDS uses two standard security mechanisms to protect the login flow:
@@ -306,6 +346,27 @@ function derToRaw(der: Buffer): Buffer {
 }
 ```
 
+### Identifying the user
+
+In Flow 1 your app passes an identifier for the user to ePDS in the
+OAuth `login_hint` parameter. ePDS accepts three forms:
+
+| Form   | Example                 | When to use                                                                                       |
+| ------ | ----------------------- | ------------------------------------------------------------------------------------------------- |
+| Email  | `alice@example.com`     | Your app collects email addresses (e.g. via a sign-in form).                                      |
+| Handle | `alice.pds.example.com` | Your app already knows the user's AT Protocol handle (e.g. from a previous session, or a follow). |
+| DID    | `did:plc:abc123…`       | Your app stores users by DID and never sees their handle.                                         |
+
+All three behave the same way from the client's perspective: ePDS sends
+the OTP to the account's email address and shows the code-entry screen
+directly. Handles and DIDs are resolved internally by the auth service.
+
+If the identifier doesn't match any existing account, ePDS falls back to
+its own email input form (the same form used in Flow 2), so passing a
+stale or unknown handle is safe.
+
+In Flow 2 you simply omit `login_hint` entirely.
+
 ### Login handler — registering the login attempt
 
 Your login handler calls ePDS's `/oauth/par` endpoint to register the login
@@ -326,8 +387,9 @@ const parBody = new URLSearchParams({
   state,
   code_challenge: codeChallenge,
   code_challenge_method: 'S256',
-  // Flow 1 only — omit for Flow 2:
-  login_hint: email,
+  // Flow 1 only — omit for Flow 2.
+  // May be an email, an AT Protocol handle, or a DID — see above.
+  login_hint: identifier,
 })
 
 // First attempt (will get a 400 with dpop-nonce)
@@ -368,12 +430,14 @@ const { request_uri } = await parRes.json()
 ### Redirecting the user to ePDS
 
 After registering the login attempt, redirect the user's browser to the ePDS
-auth page. For Flow 1, include the email so ePDS skips its own email form and
-goes straight to OTP entry:
+auth page. For Flow 1, include the same `login_hint` you passed to `/oauth/par`
+so ePDS skips its own email form and goes straight to OTP entry. The
+identifier may be an email, an AT Protocol handle, or a DID — see
+[Identifying the user](#identifying-the-user):
 
 ```typescript
 // Flow 1
-const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(request_uri)}&login_hint=${encodeURIComponent(email)}`
+const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(request_uri)}&login_hint=${encodeURIComponent(identifier)}`
 
 // Flow 2
 const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(request_uri)}`
