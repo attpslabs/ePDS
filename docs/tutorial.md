@@ -211,6 +211,39 @@ placeholder. Supported template variables:
 | `{{#is_new_user}}...{{/is_new_user}}` | Shown only on first sign-up               |
 | `{{^is_new_user}}...{{/is_new_user}}` | Shown only on subsequent sign-ins         |
 
+#### Optional: control the handle picker
+
+When a new user signs up through your app, ePDS shows them a handle picker
+by default. You can override which variant of the picker is shown by adding
+an `epds_handle_mode` field to your client metadata:
+
+```json
+{
+  "epds_handle_mode": "picker"
+}
+```
+
+Accepted values (case-sensitive):
+
+| Value                | Behaviour                                                                  |
+| -------------------- | -------------------------------------------------------------------------- |
+| `picker`             | Always show the handle picker. No "generate random" button.                |
+| `random`             | Always assign a random handle. No picker shown (pre-0.2.0 behaviour).      |
+| `picker-with-random` | Show the picker with a "generate random" button (this is the default).    |
+
+The mode is resolved per request with the following precedence — first
+match wins:
+
+1. `epds_handle_mode` query parameter on the `/oauth/authorize` URL
+2. `epds_handle_mode` field in your client metadata JSON
+3. `EPDS_DEFAULT_HANDLE_MODE` environment variable on the auth service
+4. Built-in default: `picker-with-random`
+
+If you need to override per request — e.g. for a specific signup
+campaign — append `?epds_handle_mode=picker` (or any other accepted
+value) to the `/oauth/authorize` URL you redirect the user to. Unknown or
+invalid values are silently ignored and fall through to the next source.
+
 ### Security helpers
 
 ePDS uses two standard security mechanisms to protect the login flow:
