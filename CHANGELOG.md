@@ -6,6 +6,7 @@
 
 - **Everyone (end users, client app developers, operators):**
   - [The permissions shown on the sign-in approval screen now match what the app actually asked for.](#v0.2.2-the-permissions-shown-on-the-sign-in-approval-screen-now)
+  - [Trusted apps can optionally skip the approval screen when new users sign up.](#v0.2.2-trusted-apps-can-optionally-skip-the-approval-screen)
 - **Operators also:**
   - [Sign-in no longer fails when the login service and your data server share a domain name.](#v0.2.2-sign-in-no-longer-fails-when-the-login-service-and-your)
 
@@ -43,6 +44,25 @@
   now lives in the upstream provider's `authorizedClients` tracking. The
   `client_logins` table is no longer used but is left in place (not
   dropped) to avoid breaking rollbacks in case they were ever needed.
+
+- <a id="v0.2.2-trusted-apps-can-optionally-skip-the-approval-screen"></a> [#21](https://github.com/hypercerts-org/ePDS/pull/21) [`5110845`](https://github.com/hypercerts-org/ePDS/commit/5110845) Thanks [@aspiers](https://github.com/aspiers)! - Trusted apps can optionally skip the approval screen when new users sign up.
+
+  **Affects:** End users, Client app developers, Operators
+
+  **End users:** When you create a new account through a trusted app,
+  ePDS can now send you straight back to that app without showing a
+  separate approval screen first.
+
+  **Client app developers:** To opt in, your client metadata must
+  include `epds_skip_consent_on_signup: true`. The skip only applies on
+  initial sign-up, only for trusted clients, and only when the server is
+  configured to allow it.
+
+  **Operators:** This feature has separate configuration from the normal
+  consent-screen changes. To enable it, set
+  `PDS_SIGNUP_ALLOW_CONSENT_SKIP=true`. The skip only applies to clients
+  already trusted via `PDS_OAUTH_TRUSTED_CLIENTS` and only when the
+  client metadata opts in with `epds_skip_consent_on_signup: true`.
 
 - <a id="v0.2.2-sign-in-no-longer-fails-when-the-login-service-and-your"></a> [#65](https://github.com/hypercerts-org/ePDS/pull/65) [`313c071`](https://github.com/hypercerts-org/ePDS/commit/313c07176ac04ae6f517f18cfe95cf15af1d0812) Thanks [@aspiers](https://github.com/aspiers)! - Sign-in no longer fails when the login service and your data server share a domain name.
 
