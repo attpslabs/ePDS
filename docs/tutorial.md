@@ -22,9 +22,13 @@ your app, and your app exchanges that redirect for a token.
 
 ## Flow 1 — App has its own email form
 
-1. User enters email in your app and clicks "Sign in"
-2. Your login handler registers the login attempt with ePDS (passing the email)
-3. Your app redirects the user's browser to the ePDS auth page (with the email)
+1. User enters email in your app and clicks "Sign in" — or your app
+   already knows the user's handle or DID from a previous session (see
+   [Identifying the user](#identifying-the-user))
+2. Your login handler registers the login attempt with ePDS (passing the
+   identifier as `login_hint`)
+3. Your app redirects the user's browser to the ePDS auth page (with the
+   same `login_hint`)
 4. ePDS immediately sends the OTP and shows the code-entry screen
 5. User reads the 8-digit code from their email and submits it
 6. ePDS verifies the code
@@ -339,6 +343,27 @@ function derToRaw(der: Buffer): Buffer {
 }
 ```
 
+### Identifying the user
+
+In Flow 1 your app passes an identifier for the user to ePDS in the
+OAuth `login_hint` parameter. ePDS accepts three forms:
+
+| Form   | Example                   | When to use                                                                                       |
+| ------ | ------------------------- | ------------------------------------------------------------------------------------------------- |
+| Email  | `alice@example.com`       | Your app collects email addresses (e.g. via a sign-in form).                                      |
+| Handle | `alice.pds.example.com`   | Your app already knows the user's AT Protocol handle (e.g. from a previous session, or a follow). |
+| DID    | `did:plc:abc123…`         | Your app stores users by DID and never sees their handle.                                         |
+
+All three behave the same way from the client's perspective: ePDS sends
+the OTP to the account's email address and shows the code-entry screen
+directly. Handles and DIDs are resolved internally by the auth service.
+
+If the identifier doesn't match any existing account, ePDS falls back to
+its own email input form (the same form used in Flow 2), so passing a
+stale or unknown handle is safe.
+
+In Flow 2 you simply omit `login_hint` entirely.
+
 ### Login handler — registering the login attempt
 
 Your login handler calls ePDS's `/oauth/par` endpoint to register the login
@@ -359,8 +384,9 @@ const parBody = new URLSearchParams({
   state,
   code_challenge: codeChallenge,
   code_challenge_method: 'S256',
-  // Flow 1 only — omit for Flow 2:
-  login_hint: email,
+  // Flow 1 only — omit for Flow 2.
+  // May be an email, an AT Protocol handle, or a DID — see above.
+  login_hint: identifier,
 })
 
 // First attempt (will get a 400 with dpop-nonce)
@@ -401,12 +427,14 @@ const { request_uri } = await parRes.json()
 ### Redirecting the user to ePDS
 
 After registering the login attempt, redirect the user's browser to the ePDS
-auth page. For Flow 1, include the email so ePDS skips its own email form and
-goes straight to OTP entry:
+auth page. For Flow 1, include the same `login_hint` you passed to `/oauth/par`
+so ePDS skips its own email form and goes straight to OTP entry. The
+identifier may be an email, an AT Protocol handle, or a DID — see
+[Identifying the user](#identifying-the-user):
 
 ```typescript
 // Flow 1
-const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(request_uri)}&login_hint=${encodeURIComponent(email)}`
+const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(request_uri)}&login_hint=${encodeURIComponent(identifier)}`
 
 // Flow 2
 const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(request_uri)}`
