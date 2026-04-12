@@ -71,24 +71,24 @@
 ### Who should read this release
 
 - **End users:**
-  - [Longer sign-in codes, optionally mixing letters and numbers.](#v0.2.0-longer-sign-in-codes-optionally-mixing-letters-and-numbers)
+  - [Configurable sign-in code length, optionally mixing letters and numbers.](#v0.2.0-configurable-otp-codes)
   - [Choose your own handle when signing up, instead of being given a random one.](#v0.2.0-choose-your-own-handle-when-signing-up-instead-of-being)
   - [Sign in faster from third-party apps that already know who you are.](#v0.2.0-sign-in-faster-from-third-party-apps-that-already-know-who)
 - **Client app developers:**
   - [Choose your own handle when signing up, instead of being given a random one.](#v0.2.0-choose-your-own-handle-when-signing-up-instead-of-being)
 - **Operators:**
-  - [Longer sign-in codes, optionally mixing letters and numbers.](#v0.2.0-longer-sign-in-codes-optionally-mixing-letters-and-numbers)
+  - [Configurable sign-in code length, optionally mixing letters and numbers.](#v0.2.0-configurable-otp-codes)
   - [Choose your own handle when signing up, instead of being given a random one.](#v0.2.0-choose-your-own-handle-when-signing-up-instead-of-being)
   - [Fail-fast validation of internal environment variables on the auth service.](#v0.2.0-fail-fast-validation-of-internal-environment-variables-on)
   - [Honour the generic `PORT` environment variable on both services, so Railway's automatic healthcheck succeeds without per-service configuration.](#v0.2.0-honour-the-generic-environment-variable-on-both-services-so)
 
 ### Minor Changes
 
-- <a id="v0.2.0-longer-sign-in-codes-optionally-mixing-letters-and-numbers"></a> [#14](https://github.com/hypercerts-org/ePDS/pull/14) Thanks [@Kzoeps](https://github.com/Kzoeps)! - Longer sign-in codes, optionally mixing letters and numbers.
+- <a id="v0.2.0-configurable-otp-codes"></a> [#14](https://github.com/hypercerts-org/ePDS/pull/14) Thanks [@Kzoeps](https://github.com/Kzoeps)! - Configurable sign-in code length, optionally mixing letters and numbers.
 
   **Affects:** End users, Operators
 
-  **End users:** depending on how the ePDS instance you sign in to is configured, sign-in codes sent to your email may now be longer (up to 12 characters) and may include uppercase letters as well as digits. Codes of 8 or more characters are displayed grouped in the email for readability (e.g. `1234 5678`), but you can still paste the whole code into the sign-in form as usual — the space is just a visual aid.
+  **End users:** depending on how the ePDS instance you sign in to is configured, sign-in codes sent to your email may now be shorter (as few as 4 characters) or longer (up to 12 characters) than the previous fixed length of 8, and may include uppercase letters as well as digits. Codes of 8 or more characters are displayed grouped in the email for readability (e.g. `1234 5678`), but you can still paste the whole code into the sign-in form as usual — the space is just a visual aid.
 
   **Operators:** two new environment variables on the auth service — `OTP_LENGTH` (integer, range 4–12, default 8) and `OTP_CHARSET` (`numeric` (default) or `alphanumeric`; `alphanumeric` uses uppercase A–Z plus 0–9). Values outside the range cause the service to fail on startup. The OTP form fields (input width, `pattern`, `inputmode`, `autocapitalize`) adapt automatically from the configured length and charset; no template changes are required.
 
