@@ -28,6 +28,27 @@ pnpm lint                  # lint all files with ESLint
 pnpm lint:fix              # lint and auto-fix where possible
 ```
 
+## Documentation
+
+**Always update documentation when your changes would render existing docs
+inaccurate or incomplete.** This includes but is not limited to:
+
+- Adding, removing, or renaming environment variables → update
+  `docs/configuration.md`, relevant `.env.example` files, and
+  `scripts/setup.sh` (if the variable needs prompting or injection).
+- Changing build steps, Docker workflows, or CLI commands → update
+  `docs/deployment.md`, the Docker section below, and
+  `scripts/setup.sh` next-steps output if it references the changed
+  commands.
+- Adding new scripts or changing existing ones → update the Build / Dev
+  Commands section above.
+- Changing API endpoints, health responses, or OAuth flows → update
+  `docs/tutorial.md` or the relevant design doc.
+- Changing agent-facing workflows → update this file (`AGENTS.md`).
+
+Do not treat docs as a separate follow-up task. Update them in the same
+commit or PR as the code change.
+
 ## Test Commands
 
 ```bash
@@ -127,14 +148,14 @@ a feature), add tests for other code to compensate.
 ## Docker
 
 ```bash
-# Build images (always use --no-cache — cache busting is broken)
+# Build images — use pnpm docker:build to auto-stamp the version.
 # IMPORTANT: Only rebuild the services that changed. Check the diff to
 # determine which packages are affected, then pass service names:
-sudo -g docker bash -c "cd /data/projects/ePDS && docker compose build --no-cache auth"
-sudo -g docker bash -c "cd /data/projects/ePDS && docker compose build --no-cache core"
-sudo -g docker bash -c "cd /data/projects/ePDS && docker compose build --no-cache demo"
-# Only use bare 'docker compose build --no-cache' (all services) when
-# shared/ changed or you genuinely need to rebuild everything.
+sudo -g docker bash -c "cd /data/projects/ePDS && pnpm docker:build auth"
+sudo -g docker bash -c "cd /data/projects/ePDS && pnpm docker:build core"
+sudo -g docker bash -c "cd /data/projects/ePDS && pnpm docker:build demo"
+# Only use bare 'pnpm docker:build' (all services) when shared/ changed
+# or you genuinely need to rebuild everything.
 
 # Run the full stack
 sudo -g docker bash -c "cd /data/projects/ePDS && docker compose up -d"
@@ -302,7 +323,8 @@ GitHub Release per release.
 
 - `docker compose restart` does **not** pick up `.env` changes — use
   `docker compose up -d`.
-- `docker compose build --no-cache` required (cache busting is broken for both images).
+- Use `pnpm docker:build` instead of bare `docker compose build` — it
+  stamps the ePDS version before building.
 - better-auth does **not** auto-migrate — `runBetterAuthMigrations()` must be
   called explicitly on startup.
 - New PDS accounts need a real password passed to `createAccount()` (use

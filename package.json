@@ -31,7 +31,9 @@
     "lint:fix": "eslint --fix .",
     "changeset": "changeset",
     "version-packages": "changeset version && node scripts/changelog-audience-summary.mjs",
-    "release": "changeset tag"
+    "release": "changeset tag",
+    "stamp-version": "./scripts/stamp-version.sh",
+    "docker:build": "./scripts/docker-build.sh"
   },
   "dependencies": {
     "pino": "^10.3.1"

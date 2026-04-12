@@ -33,8 +33,8 @@ deployment contexts and a full variable reference.
 ### Build and Start
 
 ```bash
-# Build images (always use --no-cache — cache busting is broken)
-docker compose build --no-cache
+# Build images (stamps the ePDS version automatically)
+pnpm docker:build
 
 # Start services
 docker compose up -d
@@ -48,7 +48,7 @@ Caddy handles TLS automatically via ACME/Let's Encrypt.
 ### Updating
 
 ```bash
-docker compose build --no-cache
+pnpm docker:build
 docker compose up -d
 ```
 

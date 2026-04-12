@@ -10,3 +10,4 @@ data
 .gitignore
 *.md
 scripts/
+!scripts/resolve-version.sh
