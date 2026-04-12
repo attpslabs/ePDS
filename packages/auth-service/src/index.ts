@@ -1,4 +1,4 @@
-import { createLogger } from '@certified-app/shared'
+import { createLogger, getEpdsVersion } from '@certified-app/shared'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import * as path from 'node:path'
@@ -108,7 +108,7 @@ export function createAuthService(config: AuthServiceConfig): {
   })
 
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'auth' })
+    res.json({ status: 'ok', service: 'auth', version: getEpdsVersion() })
   })
 
   return { app, ctx }

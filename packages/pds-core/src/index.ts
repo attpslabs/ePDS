@@ -33,6 +33,7 @@ import {
   escapeHtml,
   validateLocalPart,
   resolveClientMetadata,
+  getEpdsVersion,
 } from '@certified-app/shared'
 import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
 
@@ -794,7 +795,7 @@ async function main() {
   })
 
   pds.app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'epds' })
+    res.json({ status: 'ok', service: 'epds', version: getEpdsVersion() })
   })
 
   await pds.start()

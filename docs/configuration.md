@@ -23,14 +23,15 @@ auto-generate secrets. Safe to re-run — existing secrets are preserved.
 These must have **identical values** in pds-core and auth-service. They are
 marked `[shared]` in the per-package `.env.example` files.
 
-| Variable               | Description                                                                                             |
-| ---------------------- | ------------------------------------------------------------------------------------------------------- |
-| `PDS_HOSTNAME`         | Your PDS domain — handles will be `<random>.PDS_HOSTNAME`                                               |
-| `PDS_PUBLIC_URL`       | Full public URL of the PDS, used as OAuth issuer (e.g. `https://pds.example.com`)                       |
-| `EPDS_CALLBACK_SECRET` | HMAC-SHA256 secret signing the `/oauth/epds-callback` redirect — generate with `openssl rand -hex 32`   |
-| `EPDS_INTERNAL_SECRET` | Shared secret for internal service-to-service calls (auth → PDS) — generate with `openssl rand -hex 32` |
-| `PDS_ADMIN_PASSWORD`   | PDS admin API password (auth-service uses it for account provisioning)                                  |
-| `NODE_ENV`             | Set to `development` for dev mode (disables secure cookies)                                             |
+| Variable               | Description                                                                                                                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `EPDS_VERSION`         | Override the version string returned by `/health`. In Docker/Railway builds this is set automatically to `<package.json version>+<8-char commit SHA>`. In dev it falls back to the root `package.json` version. Only set this if you need a custom override. |
+| `PDS_HOSTNAME`         | Your PDS domain — handles will be `<random>.PDS_HOSTNAME`                                                                                                                                                                                                    |
+| `PDS_PUBLIC_URL`       | Full public URL of the PDS, used as OAuth issuer (e.g. `https://pds.example.com`)                                                                                                                                                                            |
+| `EPDS_CALLBACK_SECRET` | HMAC-SHA256 secret signing the `/oauth/epds-callback` redirect — generate with `openssl rand -hex 32`                                                                                                                                                        |
+| `EPDS_INTERNAL_SECRET` | Shared secret for internal service-to-service calls (auth → PDS) — generate with `openssl rand -hex 32`                                                                                                                                                      |
+| `PDS_ADMIN_PASSWORD`   | PDS admin API password (auth-service uses it for account provisioning)                                                                                                                                                                                       |
+| `NODE_ENV`             | Set to `development` for dev mode (disables secure cookies)                                                                                                                                                                                                  |
 
 ## PDS Core
 
