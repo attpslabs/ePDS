@@ -8,7 +8,7 @@
 // fallback when no explicit kid is present, so keys generated here will
 // produce the same kid whether or not it's stripped and re-derived.
 
-const crypto = require('crypto')
+const crypto = require('node:crypto')
 const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' })
 const jwk = privateKey.export({ format: 'jwk' })
 
