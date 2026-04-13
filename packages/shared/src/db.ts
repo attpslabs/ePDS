@@ -32,6 +32,19 @@ export interface EmailRateLimitRow {
   sentAt: number
 }
 
+export interface ApiClientRow {
+  id: string
+  name: string
+  clientId: string | null
+  apiKeyHash: string
+  allowedOrigins: string | null
+  canSignup: number
+  rateLimitPerHour: number
+  createdAt: number
+  revokedAt: number | null
+  lastUsedAt: number | null
+}
+
 export interface AuthFlowRow {
   flowId: string
   requestUri: string
@@ -187,6 +200,33 @@ export class EpdsDb {
       // changed to a no-op since the table is harmless to keep and dropping
       // it prevents rollback. The table is no longer used by current code.
       () => {},
+
+      // v10: Per-client API keys for headless OTP endpoints
+      () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS api_clients (
+            id                  TEXT PRIMARY KEY,
+            name                TEXT NOT NULL,
+            client_id           TEXT,
+            api_key_hash        TEXT NOT NULL,
+            allowed_origins     TEXT,
+            can_signup          INTEGER DEFAULT 1,
+            rate_limit_per_hour INTEGER DEFAULT 10000,
+            created_at          INTEGER NOT NULL,
+            revoked_at          INTEGER,
+            last_used_at        INTEGER
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_ac_key_hash ON api_clients(api_key_hash);
+
+          CREATE TABLE IF NOT EXISTS api_client_usage (
+            client_id TEXT NOT NULL,
+            action    TEXT NOT NULL,
+            timestamp INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_acu_client_time ON api_client_usage(client_id, timestamp);
+        `)
+      },
     ]
 
     for (let i = currentVersion; i < migrations.length; i++) {
@@ -462,6 +502,84 @@ export class EpdsDb {
     const result = this.db
       .prepare(`DELETE FROM auth_flow WHERE expires_at < ?`)
       .run(Date.now())
+    return result.changes
+  }
+
+  // ── API Client Operations ──
+
+  createApiClient(data: {
+    id: string
+    name: string
+    clientId: string | null
+    apiKeyHash: string
+    allowedOrigins: string | null
+    canSignup: boolean
+    rateLimitPerHour: number
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO api_clients (id, name, client_id, api_key_hash, allowed_origins, can_signup, rate_limit_per_hour, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        data.id,
+        data.name,
+        data.clientId,
+        data.apiKeyHash,
+        data.allowedOrigins,
+        data.canSignup ? 1 : 0,
+        data.rateLimitPerHour,
+        Date.now(),
+      )
+  }
+
+  getApiClientByKeyHash(apiKeyHash: string): ApiClientRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT
+        id, name, client_id as clientId, api_key_hash as apiKeyHash,
+        allowed_origins as allowedOrigins, can_signup as canSignup,
+        rate_limit_per_hour as rateLimitPerHour, created_at as createdAt,
+        revoked_at as revokedAt, last_used_at as lastUsedAt
+       FROM api_clients WHERE api_key_hash = ? AND revoked_at IS NULL`,
+      )
+      .get(apiKeyHash) as ApiClientRow | undefined
+  }
+
+  revokeApiClient(id: string): void {
+    this.db
+      .prepare(`UPDATE api_clients SET revoked_at = ? WHERE id = ?`)
+      .run(Date.now(), id)
+  }
+
+  updateApiClientLastUsed(id: string): void {
+    this.db
+      .prepare(`UPDATE api_clients SET last_used_at = ? WHERE id = ?`)
+      .run(Date.now(), id)
+  }
+
+  recordApiClientUsage(clientId: string, action: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO api_client_usage (client_id, action, timestamp) VALUES (?, ?, ?)`,
+      )
+      .run(clientId, action, Date.now())
+  }
+
+  getApiClientUsageCount(clientId: string, sinceMs: number): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as count FROM api_client_usage WHERE client_id = ? AND timestamp > ?`,
+      )
+      .get(clientId, Date.now() - sinceMs) as { count: number }
+    return row.count
+  }
+
+  cleanupOldApiClientUsage(): number {
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000
+    const result = this.db
+      .prepare(`DELETE FROM api_client_usage WHERE timestamp < ?`)
+      .run(oneDayAgo)
     return result.changes
   }
 

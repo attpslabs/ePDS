@@ -4,6 +4,7 @@ export type {
   BackupEmailRow,
   EmailRateLimitRow,
   AuthFlowRow,
+  ApiClientRow,
 } from './db.js'
 export {
   generateVerificationToken,

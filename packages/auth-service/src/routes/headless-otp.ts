@@ -1,18 +1,19 @@
 /**
- * Headless OTP endpoints for first-party clients (e.g. Linkname).
+ * Headless OTP endpoints for registered API clients.
  *
  * These endpoints allow a client app to send and verify OTP codes without
  * the OAuth redirect flow. The client's own UI collects the email and code,
  * and its backend proxies to these endpoints server-to-server.
  *
- * Both endpoints are authenticated via the x-internal-secret header
- * (same pattern as pds-core's /_internal/* endpoints).
+ * Both endpoints are authenticated via the x-api-key header, which maps to
+ * a registered client in the api_clients table. Each client has per-client
+ * rate limits, optional origin restrictions, and a can_signup permission.
  *
  * POST /_internal/otp/send   — generate + email an OTP code
  * POST /_internal/otp/verify — verify code, return AT Proto session tokens
  */
 import { Router, type Request, type Response } from 'express'
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { createLogger } from '@certified-app/shared'
 import type { AuthServiceContext } from '../context.js'
 import type { BetterAuthInstance } from '../better-auth.js'
@@ -22,17 +23,13 @@ import {
   setHeadlessClientId,
   clearHeadlessClientId,
 } from '../better-auth.js'
+import {
+  authenticateApiKey,
+  checkAllowedOrigin,
+  checkApiClientRateLimit,
+} from '../lib/headless-auth.js'
 
 const logger = createLogger('auth:headless-otp')
-
-function verifyInternalSecret(
-  header: string | string[] | undefined,
-): boolean {
-  const secret = process.env.EPDS_INTERNAL_SECRET
-  if (!secret || typeof header !== 'string') return false
-  const hash = (v: string) => createHash('sha256').update(v).digest()
-  return timingSafeEqual(hash(header), hash(secret))
-}
 
 function adminAuth(): string {
   const password = process.env.PDS_ADMIN_PASSWORD
@@ -59,14 +56,26 @@ export function createHeadlessOtpRouter(
 
   // ─── POST /_internal/otp/send ───────────────────────────────────────
   router.post('/_internal/otp/send', async (req: Request, res: Response) => {
-    if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+    const apiClient = authenticateApiKey(req, ctx.db)
+    if (!apiClient) {
+      logger.warn({ ip: req.ip }, 'Headless OTP send: invalid API key')
       res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    if (!checkAllowedOrigin(apiClient.allowedOrigins, req.headers.origin as string | undefined)) {
+      res.status(403).json({ error: 'OriginNotAllowed' })
+      return
+    }
+
+    if (!checkApiClientRateLimit(ctx.db, apiClient.id, apiClient.rateLimitPerHour)) {
+      res.status(429).json({ error: 'RateLimitExceeded' })
       return
     }
 
     const email = ((req.body?.email as string) || '').trim().toLowerCase()
     const purpose = (req.body?.purpose as string) || ''
-    const clientId = (req.body?.clientId as string) || undefined
+    const clientId = (req.body?.clientId as string) || apiClient.clientId || undefined
 
     if (!email || !purpose) {
       res.status(400).json({ error: 'email and purpose are required' })
@@ -75,6 +84,11 @@ export function createHeadlessOtpRouter(
 
     if (purpose !== 'login' && purpose !== 'signup') {
       res.status(400).json({ error: 'purpose must be login or signup' })
+      return
+    }
+
+    if (purpose === 'signup' && !apiClient.canSignup) {
+      res.status(403).json({ error: 'SignupNotAllowed' })
       return
     }
 
@@ -93,13 +107,18 @@ export function createHeadlessOtpRouter(
     }
 
     if (purpose === 'signup') {
-      // Check that no account exists for this email
+      // Anti-enumeration: return success whether or not an account exists.
+      // The actual conflict will be caught at verify-time (createAccount fails).
       const did = await getDidByEmail(email, pdsUrl, internalSecret)
       if (did) {
-        res.status(409).json({ error: 'EmailNotAvailable' })
+        logger.info({ email }, 'Headless OTP send: email already registered (anti-enumeration)')
+        res.json({ success: true })
         return
       }
     }
+
+    ctx.db.recordApiClientUsage(apiClient.id, 'otp_send')
+    ctx.db.updateApiClientLastUsed(apiClient.id)
 
     // Store clientId for branding in the sendVerificationOTP callback
     if (clientId) {
@@ -124,8 +143,20 @@ export function createHeadlessOtpRouter(
 
   // ─── POST /_internal/otp/verify ─────────────────────────────────────
   router.post('/_internal/otp/verify', async (req: Request, res: Response) => {
-    if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+    const apiClient = authenticateApiKey(req, ctx.db)
+    if (!apiClient) {
+      logger.warn({ ip: req.ip }, 'Headless OTP verify: invalid API key')
       res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    if (!checkAllowedOrigin(apiClient.allowedOrigins, req.headers.origin as string | undefined)) {
+      res.status(403).json({ error: 'OriginNotAllowed' })
+      return
+    }
+
+    if (!checkApiClientRateLimit(ctx.db, apiClient.id, apiClient.rateLimitPerHour)) {
+      res.status(429).json({ error: 'RateLimitExceeded' })
       return
     }
 
@@ -144,6 +175,11 @@ export function createHeadlessOtpRouter(
       return
     }
 
+    if (purpose === 'signup' && !apiClient.canSignup) {
+      res.status(403).json({ error: 'SignupNotAllowed' })
+      return
+    }
+
     // Verify OTP via Better Auth
     try {
       await auth.api.signInEmailOTP({
@@ -154,6 +190,9 @@ export function createHeadlessOtpRouter(
       res.status(400).json({ error: 'InvalidCode' })
       return
     }
+
+    ctx.db.recordApiClientUsage(apiClient.id, 'otp_verify')
+    ctx.db.updateApiClientLastUsed(apiClient.id)
 
     const pdsUrl = getPdsUrl()
     const handleDomain = getHandleDomain()
