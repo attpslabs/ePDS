@@ -44,7 +44,9 @@ raw email as `login_hint`.
 
 ### 1. Client Metadata (confidential client)
 
-Host at your `client_id` URL (must be HTTPS in production):
+Host at your `client_id` URL (must be HTTPS in production). Provide the
+public key via `jwks_uri` (remote endpoint) or inline `jwks` — the two
+are mutually exclusive:
 
 ```json
 {
@@ -61,9 +63,10 @@ Host at your `client_id` URL (must be HTTPS in production):
 }
 ```
 
-See [client-metadata.md](references/client-metadata.md) for all fields,
-the force-consent gotcha with public clients, and JWKS
-publishing instructions.
+Alternatively, replace `jwks_uri` with an inline `jwks` object containing
+the public key directly — see
+[client-metadata.md](references/client-metadata.md) for both forms, the
+force-consent gotcha with public clients, and key generation instructions.
 
 ### 2. Create the OAuth client
 
@@ -147,15 +150,16 @@ const session = await client.restore(userDid)
 
 ### 6. Serve library endpoints
 
-The library expects two endpoints to be publicly reachable — your
-`client_id` URL and your `jwks_uri`. You can serve them from the
-`NodeOAuthClient` instance:
+Your `client_id` URL must be publicly reachable. If you use `jwks_uri`
+(rather than inline `jwks`), that endpoint must also be reachable. You
+can serve both from the `NodeOAuthClient` instance:
 
 ```typescript
 app.get('/client-metadata.json', (req, res) => {
   res.json(client.clientMetadata)
 })
 
+// Only needed when using jwks_uri (not inline jwks)
 app.get('/jwks.json', (req, res) => {
   res.json(client.jwks)
 })

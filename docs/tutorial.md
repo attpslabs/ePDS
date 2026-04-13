@@ -210,8 +210,8 @@ The file must be served with `Content-Type: application/json`:
 
 The fields from `scope` onward are fixed values required by the AT
 Protocol — copy them as-is. The only things you need to change are
-`client_id`, `client_name`, `client_uri`, `logo_uri`, `redirect_uris`,
-and `jwks_uri`.
+`client_id`, `client_name`, `client_uri`, `logo_uri`, and `redirect_uris`
+(plus the key fields described below).
 
 #### Confidential vs public clients
 
@@ -221,14 +221,21 @@ setting for any app users will sign in to more than once, because the PDS
 remembers consent — returning users skip the consent screen.
 
 The alternative is `"token_endpoint_auth_method": "none"` (a **public
-client**), which is simpler (no key management, no `jwks_uri`, no
+client**), which is simpler (no key management, no JWKS, no
 `token_endpoint_auth_signing_alg`) but forces a consent screen on every
 login. This is a deliberate AT Protocol security property for clients that
 cannot prove their identity. Use `"none"` only for local development or
 apps where per-login consent is acceptable.
 
-For confidential clients, the `jwks_uri` must serve a JWKS document
-containing the public half of the ES256 key pair you use to sign requests.
+For confidential clients, you must provide the public half of your ES256
+signing key. There are two mutually exclusive ways to do this:
+
+- **`jwks_uri`** — a URL that serves a `{"keys": [...]}` document. Easier
+  to rotate keys (update the endpoint, no metadata redeploy).
+- **`jwks`** — an inline `{"keys": [...]}` object embedded directly in
+  the client metadata JSON. Simpler setup (no extra endpoint), but key
+  rotation requires redeploying the metadata file.
+
 Generate a key pair with `@atproto/jwk-jose`:
 
 ```typescript
@@ -238,7 +245,7 @@ const key = await JoseKey.generate(['ES256'])
 const privateJwk = key.privateJwk // store securely (env var, secret manager)
 ```
 
-Then serve the public half at your `jwks_uri`:
+If using `jwks_uri`, serve the public half at that URL:
 
 ```typescript
 app.get('/jwks.json', (req, res) => {
@@ -246,6 +253,9 @@ app.get('/jwks.json', (req, res) => {
   res.json({ keys: [publicJwk] })
 })
 ```
+
+If using inline `jwks`, embed the public key (without `d`) directly in
+your client metadata JSON instead.
 
 #### Optional branding
 

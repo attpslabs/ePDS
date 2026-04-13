@@ -42,6 +42,12 @@ at the end for the shorter `none` variant.
 
 ## Minimal example (confidential client)
 
+You must provide the public half of your signing key either via a
+`jwks_uri` (remote URL) or inline as a `jwks` object. The two are
+mutually exclusive — the PDS rejects metadata that has both.
+
+**Option A — remote JWKS (`jwks_uri`):**
+
 ```json
 {
   "client_id": "https://yourapp.example.com/client-metadata.json",
@@ -57,30 +63,62 @@ at the end for the shorter `none` variant.
 }
 ```
 
-The `jwks_uri` must return a JWKS document containing the public half of
-the ES256 keypair you use to sign `client_assertion` JWTs — see
-[Publishing the JWKS document](#publishing-the-jwks-document) below.
+**Option B — inline JWKS (`jwks`):**
+
+```json
+{
+  "client_id": "https://yourapp.example.com/client-metadata.json",
+  "client_name": "Your App Name",
+  "redirect_uris": ["https://yourapp.example.com/api/oauth/callback"],
+  "scope": "atproto transition:generic",
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "private_key_jwt",
+  "token_endpoint_auth_signing_alg": "ES256",
+  "jwks": {
+    "keys": [
+      {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "...",
+        "y": "...",
+        "kid": "my-key-1"
+      }
+    ]
+  },
+  "dpop_bound_access_tokens": true
+}
+```
+
+With `jwks_uri`, key rotation is simpler (update the endpoint, no client
+metadata redeploy). With inline `jwks`, there is no extra endpoint to
+host — useful for simpler setups. See
+[Publishing the JWKS document](#publishing-the-jwks-document) below for
+key generation and serving details.
 
 ## All supported fields
 
-| Field                             | Required    | Description                                                                           |
-| --------------------------------- | ----------- | ------------------------------------------------------------------------------------- |
-| `client_id`                       | Yes         | Must match the URL where this file is hosted                                          |
-| `client_name`                     | Yes         | Shown on the login page and in OTP emails                                             |
-| `redirect_uris`                   | Yes         | Array of allowed callback URLs after login                                            |
-| `scope`                           | Yes         | Always `"atproto transition:generic"`                                                 |
-| `grant_types`                     | Yes         | Always `["authorization_code", "refresh_token"]`                                      |
-| `response_types`                  | Yes         | Always `["code"]`                                                                     |
-| `token_endpoint_auth_method`      | Yes         | `"private_key_jwt"` (recommended) or `"none"` — see above                             |
-| `token_endpoint_auth_signing_alg` | Conditional | Required when `token_endpoint_auth_method` is `"private_key_jwt"`. Must be `"ES256"`. |
-| `jwks_uri`                        | Conditional | Required when `token_endpoint_auth_method` is `"private_key_jwt"`. Public JWKS URL.   |
-| `dpop_bound_access_tokens`        | Yes         | Always `true`                                                                         |
-| `client_uri`                      | No          | Your app's homepage URL                                                               |
-| `logo_uri`                        | No          | URL to your app logo (shown on login page)                                            |
-| `email_template_uri`              | No          | URL to a custom OTP email HTML template                                               |
-| `email_subject_template`          | No          | Custom email subject line with `{{code}}` placeholder                                 |
-| `brand_color`                     | No          | Hex colour for buttons and input focus rings (default: `#1A130F`)                     |
-| `background_color`                | No          | Hex colour for the login page background (default: `#F2EBE4`)                         |
+| Field                             | Required    | Description                                                                                                                                                                                    |
+| --------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `client_id`                       | Yes         | Must match the URL where this file is hosted                                                                                                                                                   |
+| `client_name`                     | Yes         | Shown on the login page and in OTP emails                                                                                                                                                      |
+| `redirect_uris`                   | Yes         | Array of allowed callback URLs after login                                                                                                                                                     |
+| `scope`                           | Yes         | Always `"atproto transition:generic"`                                                                                                                                                          |
+| `grant_types`                     | Yes         | Always `["authorization_code", "refresh_token"]`                                                                                                                                               |
+| `response_types`                  | Yes         | Always `["code"]`                                                                                                                                                                              |
+| `token_endpoint_auth_method`      | Yes         | `"private_key_jwt"` (recommended) or `"none"` — see above                                                                                                                                      |
+| `token_endpoint_auth_signing_alg` | Conditional | Required when `token_endpoint_auth_method` is `"private_key_jwt"`. Must be `"ES256"`.                                                                                                          |
+| `jwks_uri`                        | Conditional | Public JWKS URL. Required for `"private_key_jwt"` unless `jwks` is provided. Mutually exclusive with `jwks`.                                                                                   |
+| `jwks`                            | Conditional | Inline JWKS object (`{"keys": [...]}`). Alternative to `jwks_uri`. Mutually exclusive with `jwks_uri`.                                                                                         |
+| `dpop_bound_access_tokens`        | Yes         | Always `true`                                                                                                                                                                                  |
+| `client_uri`                      | No          | Your app's homepage URL                                                                                                                                                                        |
+| `logo_uri`                        | No          | URL to your app logo (shown on login page)                                                                                                                                                     |
+| `email_template_uri`              | No          | URL to a custom OTP email HTML template                                                                                                                                                        |
+| `email_subject_template`          | No          | Custom email subject line with `{{code}}` placeholder                                                                                                                                          |
+| `brand_color`                     | No          | Hex colour for buttons and input focus rings (default: `#1A130F`)                                                                                                                              |
+| `background_color`                | No          | Hex colour for the login page background (default: `#F2EBE4`)                                                                                                                                  |
+| `epds_handle_mode`                | No          | ePDS extension. Handle picker variant for new users: `"picker"`, `"random"`, or `"picker-with-random"` (default). See [tutorial](../../docs/tutorial.md#optional-control-the-handle-picker).   |
+| `epds_skip_consent_on_signup`     | No          | ePDS extension. When `true`, skip the consent screen on initial sign-up. Only honoured when the PDS has `PDS_SIGNUP_ALLOW_CONSENT_SKIP=true` AND the client is in `PDS_OAUTH_TRUSTED_CLIENTS`. |
 
 ## Custom email templates
 
@@ -120,9 +158,10 @@ Minimal template example:
 
 ## Publishing the JWKS document
 
-When using `private_key_jwt`, your `jwks_uri` must serve a JSON Web Key
-Set containing the public half of the ES256 key pair you use to sign
-`client_assertion` JWTs.
+When using `private_key_jwt`, you must make the public half of your ES256
+key pair available to the PDS so it can verify `client_assertion`
+signatures. You have two options: host a `jwks_uri` endpoint, or embed
+the key inline in your client metadata as `jwks`.
 
 ### Generate a key pair
 
@@ -145,7 +184,7 @@ console.log('kid:', privateJwk?.kid)
 Store the private JWK securely (e.g. in an environment variable or secret
 manager). You will need it when constructing the `NodeOAuthClient` keyset.
 
-### Serve the JWKS endpoint
+### Option A: Serve a `jwks_uri` endpoint
 
 Your `jwks_uri` must return a `{"keys": [...]}` document containing only
 the **public** half of each key. Strip the `d` parameter (the private
@@ -163,10 +202,39 @@ The response must have `Content-Type: application/json`. ePDS fetches this
 URL when your app makes a PAR or token request with `client_assertion` to
 verify the signature.
 
+This approach makes key rotation simpler — update the endpoint without
+redeploying your client metadata.
+
+### Option B: Embed keys inline as `jwks`
+
+Instead of hosting a separate endpoint, embed the public key directly in
+your client metadata JSON:
+
+```json
+{
+  "jwks": {
+    "keys": [
+      {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "...",
+        "y": "...",
+        "kid": "my-key-1"
+      }
+    ]
+  }
+}
+```
+
+Strip the `d` (private) parameter before embedding — only the public
+components (`kty`, `crv`, `x`, `y`, `kid`) should appear. This is
+simpler for apps that don't want to host an extra endpoint, but key
+rotation requires updating and redeploying the client metadata file.
+
 ### Key rotation
 
-You can publish multiple keys in the `keys` array. ePDS matches by `kid`.
-To rotate:
+Whether using `jwks_uri` or inline `jwks`, you can include multiple keys
+in the `keys` array. ePDS matches by `kid`. To rotate:
 
 1. Generate a new key pair
 2. Add the new public key to the JWKS array
