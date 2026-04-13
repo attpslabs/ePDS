@@ -1,5 +1,8 @@
 # ePDS — extended Personal Data Server
 
+> [!NOTE]  
+> This readme is not updated. Please see [self.surf/info](https://self.surf/info)
+
 ePDS lets your users sign in to [AT Protocol](https://atproto.com/) apps — like
 [Bluesky](https://bsky.app/) — using familiar login methods: **email OTP**, **Google**,
 **GitHub**, or any other provider [Better Auth](https://www.better-auth.com/) supports.
