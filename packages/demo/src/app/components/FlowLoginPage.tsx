@@ -2,7 +2,6 @@
 
 import { useSearchParams } from 'next/navigation'
 import { useState, Suspense } from 'react'
-import { PageShell } from './PageShell'
 import { SignInButton } from './SignInButton'
 
 export interface FlowLink {
@@ -24,7 +23,7 @@ function FlowLogin({ subtitle, handleMode, navLinks }: FlowLoginPageProps) {
   const [submitting, setSubmitting] = useState(false)
 
   return (
-    <PageShell>
+    <>
       <p
         style={{
           fontSize: '13px',
@@ -81,7 +80,7 @@ function FlowLogin({ subtitle, handleMode, navLinks }: FlowLoginPageProps) {
           {link.label}
         </a>
       ))}
-    </PageShell>
+    </>
   )
 }
 
