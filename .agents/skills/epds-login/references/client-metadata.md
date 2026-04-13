@@ -165,20 +165,20 @@ the key inline in your client metadata as `jwks`.
 
 ### Generate a key pair
 
-Use the `@atproto/jwk-jose` package (or any tool that produces an ES256
-JWK):
+The ePDS repository includes a generation script:
+
+```bash
+pnpm jwk:generate
+# Outputs compact JSON: {"kty":"EC","crv":"P-256","x":"...","y":"...","d":"...","kid":"..."}
+```
+
+Or use `@atproto/jwk-jose` programmatically:
 
 ```typescript
 import { JoseKey } from '@atproto/jwk-jose'
 
-// Generate a fresh ES256 key pair
 const key = await JoseKey.generate(['ES256'])
-
-// Export the private key for secure storage (never expose this)
 const privateJwk = key.privateJwk // { kty: "EC", crv: "P-256", x, y, d, kid }
-
-// The kid (key ID) is auto-generated — use the same kid in your JWKS
-console.log('kid:', privateJwk?.kid)
 ```
 
 Store the private JWK securely (e.g. in an environment variable or secret

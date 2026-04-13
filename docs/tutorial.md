@@ -228,7 +228,14 @@ signing key. There are two mutually exclusive ways to do this:
   the client metadata JSON. Simpler setup (no extra endpoint), but key
   rotation requires redeploying the metadata file.
 
-Generate a key pair with `@atproto/jwk-jose`:
+Generate a key pair using the ePDS helper script or `@atproto/jwk-jose`:
+
+```bash
+pnpm jwk:generate
+# Outputs: {"kty":"EC","crv":"P-256","x":"...","y":"...","d":"...","kid":"..."}
+```
+
+Or programmatically:
 
 ```typescript
 import { JoseKey } from '@atproto/jwk-jose'
