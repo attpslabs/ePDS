@@ -182,6 +182,11 @@ export class EpdsDb {
       () => {
         this.db.exec(`ALTER TABLE auth_flow ADD COLUMN handle_mode TEXT;`)
       },
+
+      // v9: no-op. PR #21 originally dropped client_logins here, but
+      // changed to a no-op since the table is harmless to keep and dropping
+      // it prevents rollback. The table is no longer used by current code.
+      () => {},
     ]
 
     for (let i = currentVersion; i < migrations.length; i++) {
@@ -486,23 +491,6 @@ export class EpdsDb {
       }
     ).c
     return { pendingTokens, backupEmails, rateLimitEntries }
-  }
-
-  // ── Per-Client Login Tracking ──
-
-  hasClientLogin(email: string, clientId: string): boolean {
-    const row = this.db
-      .prepare(`SELECT 1 FROM client_logins WHERE email = ? AND client_id = ?`)
-      .get(email.toLowerCase(), clientId)
-    return !!row
-  }
-
-  recordClientLogin(email: string, clientId: string): void {
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO client_logins (email, client_id, first_login_at) VALUES (?, ?, ?)`,
-      )
-      .run(email.toLowerCase(), clientId, Date.now())
   }
 
   close(): void {

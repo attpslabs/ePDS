@@ -1,4 +1,4 @@
-import { createLogger } from '@certified-app/shared'
+import { createLogger, getEpdsVersion } from '@certified-app/shared'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import * as path from 'node:path'
@@ -10,7 +10,6 @@ import { createBetterAuth, runBetterAuthMigrations } from './better-auth.js'
 import { csrfProtection } from './middleware/csrf.js'
 import { requestRateLimit } from './middleware/rate-limit.js'
 import { createLoginPageRouter } from './routes/login-page.js'
-import { createConsentRouter } from './routes/consent.js'
 import { createRecoveryRouter } from './routes/recovery.js'
 import { createAccountLoginRouter } from './routes/account-login.js'
 import { createAccountSettingsRouter } from './routes/account-settings.js'
@@ -79,7 +78,6 @@ export function createAuthService(config: AuthServiceConfig): {
 
   // Routes
   app.use(createLoginPageRouter(ctx))
-  app.use(createConsentRouter(ctx))
   app.use(createRecoveryRouter(ctx, betterAuthInstance))
   app.use(createAccountLoginRouter(betterAuthInstance, ctx))
   app.use(createAccountSettingsRouter(ctx, betterAuthInstance))
@@ -110,7 +108,7 @@ export function createAuthService(config: AuthServiceConfig): {
   })
 
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'auth' })
+    res.json({ status: 'ok', service: 'auth', version: getEpdsVersion() })
   })
 
   return { app, ctx }

@@ -25,6 +25,11 @@ applyPdsPortFallback()
 import type * as http from 'node:http'
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto'
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
+import { readFileSync } from 'node:fs'
+/* v8 ignore next 3 -- module-level init, only testable via e2e */
+const atprotoPdsPkg: { version: string } = JSON.parse(
+  readFileSync(require.resolve('@atproto/pds/package.json'), 'utf8'),
+)
 import { HandleUnavailableError } from '@atproto/oauth-provider'
 import {
   generateRandomHandle,
@@ -32,12 +37,16 @@ import {
   verifyCallback,
   escapeHtml,
   validateLocalPart,
+  resolveClientMetadata,
+  getEpdsVersion,
 } from '@certified-app/shared'
+import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
 
 const logger = createLogger('pds-core')
 
 async function main() {
   const env = readEnv()
+  env.version ??= atprotoPdsPkg.version
   const cfg = envToCfg(env)
   const secrets = envToSecrets(env)
 
@@ -71,6 +80,12 @@ async function main() {
 
   const epdsCallbackSecret =
     process.env.EPDS_CALLBACK_SECRET || 'dev-callback-secret-change-me'
+
+  // When true, consent may be skipped on initial sign-up for trusted clients
+  // that request it via epds_skip_consent_on_signup in their metadata.
+  const signupAllowConsentSkip =
+    process.env.PDS_SIGNUP_ALLOW_CONSENT_SKIP === 'true' ||
+    process.env.PDS_SIGNUP_ALLOW_CONSENT_SKIP === '1'
 
   pds.app.get('/oauth/epds-callback', async (req, res) => {
     // We use `as any` casts for branded OAuth types (RequestUri, Code, etc.)
@@ -158,18 +173,15 @@ async function main() {
       )
       const { deviceId, deviceMetadata } = deviceInfo
 
-      // Step 2: Get the pending authorization request
+      // Step 2: Refresh the PAR request expiry timer.
+      // Call get() WITHOUT deviceId so it doesn't bind one — the stock
+      // oauthMiddleware will bind the browser's deviceId when we redirect
+      // through /oauth/authorize below.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
-      const requestData = await (provider.requestManager as any).get(
-        requestUri,
-        deviceId,
-      )
-      const { clientId, parameters } = requestData
+      const requestData = await (provider.requestManager as any).get(requestUri)
+      const { clientId } = requestData
 
-      // Step 3: Get the client
-      const client = await provider.clientManager.getClient(clientId)
-
-      // Step 4: Resolve or create the account.
+      // Step 3: Resolve or create the account.
       // Use the PDS accountManager directly — account.sqlite is the single source of truth.
       // Backup email lookup (recovery flow) is handled by the auth-service before issuing
       // the HMAC-signed callback; by the time we reach here, email is the verified primary.
@@ -293,65 +305,140 @@ async function main() {
         }
       }
 
-      // Step 5: Bind account to device session (for future SSO)
+      // Step 4: Bind account to device session (for future SSO).
       await provider.accountManager.upsertDeviceAccount(deviceId, account.sub)
 
-      // Step 6: Issue authorization code
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
-      const code = await (provider.requestManager as any).setAuthorized(
-        requestUri,
-        client,
-        account,
-        deviceId,
-        deviceMetadata,
-      )
+      // Step 5: Determine whether to skip consent on sign-up.
+      // Consent is skipped only when ALL of these hold:
+      //   a) This is a brand-new account (not an existing user)
+      //   b) PDS_SIGNUP_ALLOW_CONSENT_SKIP is truthy
+      //   c) The client is trusted (listed in PDS_OAUTH_TRUSTED_CLIENTS)
+      //   d) The client's metadata has epds_skip_consent_on_signup: true
+      const isNewAccount = !existingAccount
 
-      // Step 7: Update authorized clients (consent tracking)
-      const { authorizedClients } = await provider.accountManager.getAccount(
-        account.sub,
-      )
-      const clientData = authorizedClients.get(clientId)
-      if (provider.checkConsentRequired(parameters, clientData)) {
-        const scopes = new Set(clientData?.authorizedScopes)
-        for (const s of parameters.scope?.split(' ') ?? []) scopes.add(s)
-        await provider.accountManager.setAuthorizedClient(account, client, {
-          ...clientData,
-          authorizedScopes: [...scopes],
-        })
+      if (isNewAccount && signupAllowConsentSkip) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider Client type not exported
+          const client = await (provider.clientManager as any).getClient(
+            clientId,
+          )
+          const clientMetadata = await resolveClientMetadata(clientId)
+
+          if (
+            client.info?.isTrusted &&
+            clientMetadata.epds_skip_consent_on_signup === true
+          ) {
+            // Bind device to the PAR request so setAuthorized() can proceed
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
+            const requestData = await (provider.requestManager as any).get(
+              requestUri,
+              deviceId,
+            )
+            const { parameters } = requestData
+
+            // Issue authorization code directly (bypasses /oauth/authorize)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
+            const code = await (provider.requestManager as any).setAuthorized(
+              requestUri,
+              client,
+              account,
+              deviceId,
+              deviceMetadata,
+            )
+
+            // Record the client as authorized so future logins can auto-approve
+            const scopeStr = parameters.scope as string | undefined
+            const scopes = scopeStr?.split(' ') ?? []
+            await provider.accountManager.setAuthorizedClient(account, client, {
+              authorizedScopes: scopes,
+            })
+
+            // Build redirect URL and send user directly to client
+            const redirectUri = parameters.redirect_uri as string | undefined
+            if (!redirectUri) {
+              res
+                .status(400)
+                .json({ error: 'No redirect_uri in authorization request' })
+              return
+            }
+
+            const redirectUrl = new URL(redirectUri)
+            const responseMode = (parameters.response_mode as string) || 'query'
+            const redirectParams: [string, string][] = [
+              ['iss', pdsUrl],
+              ['code', code],
+            ]
+            if (parameters.state) {
+              redirectParams.push(['state', parameters.state as string])
+            }
+
+            if (responseMode === 'fragment') {
+              const fragmentParams = new URLSearchParams()
+              for (const [k, v] of redirectParams) fragmentParams.set(k, v)
+              redirectUrl.hash = fragmentParams.toString()
+            } else {
+              for (const [k, v] of redirectParams) {
+                redirectUrl.searchParams.set(k, v)
+              }
+            }
+
+            res.setHeader('Cache-Control', 'no-store')
+            res.redirect(303, redirectUrl.toString())
+
+            logger.info(
+              { did, clientId },
+              'ePDS callback: consent skipped on sign-up (trusted client), redirecting to client',
+            )
+            return
+          }
+        } catch (err) {
+          // If consent-skip fails for any reason, fall through to normal flow
+          logger.warn(
+            { err, clientId },
+            'ePDS callback: consent-skip check failed, falling through to normal flow',
+          )
+        }
       }
 
-      // Step 8: Build redirect URL and send user back to client
-      const redirectUri = parameters.redirect_uri
-      if (!redirectUri) {
-        res
-          .status(400)
-          .json({ error: 'No redirect_uri in authorization request' })
-        return
+      // Step 6: Set login_hint in the stored PAR parameters so the stock
+      // authorize UI auto-selects this account's session and skips account
+      // selection (going straight to consent or auto-approve).
+      // The oauth-provider UI checks `selected` which is true when
+      // login_hint matches the account AND prompt !== 'select_account'.
+      // prompt is already 'consent' (forced by the provider for
+      // unauthenticated clients).
+      if (did) {
+        const REQUEST_URI_PREFIX = 'urn:ietf:params:oauth:request_uri:'
+        const requestId = decodeURIComponent(
+          requestUri.slice(REQUEST_URI_PREFIX.length),
+        )
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider store not exported
+        const store = (provider.requestManager as any).store
+        const storedRequest = await store.readRequest(requestId)
+        if (storedRequest?.parameters) {
+          await store.updateRequest(requestId, {
+            parameters: { ...storedRequest.parameters, login_hint: did },
+          })
+        }
       }
 
-      const redirectUrl = new URL(redirectUri)
-      const responseMode = parameters.response_mode || 'query'
-
-      const redirectParams: [string, string][] = [
-        ['iss', pdsUrl],
-        ['code', code],
-      ]
-      if (parameters.state) {
-        redirectParams.push(['state', parameters.state])
-      }
-
-      if (responseMode === 'fragment') {
-        const fragmentParams = new URLSearchParams()
-        for (const [k, v] of redirectParams) fragmentParams.set(k, v)
-        redirectUrl.hash = fragmentParams.toString()
-      } else {
-        for (const [k, v] of redirectParams) redirectUrl.searchParams.set(k, v)
-      }
+      // Step 7: Redirect through the stock /oauth/authorize endpoint.
+      // The oauthMiddleware will call provider.authorize() which:
+      // - Finds the device session we just created via upsertDeviceAccount
+      // - Checks checkConsentRequired() against actual OAuth scopes
+      // - Auto-approves if no consent needed (SSO match, previously authorized scopes)
+      // - Renders the upstream consent UI (consent-view.tsx) if consent is required
+      const authorizeUrl = new URL('/oauth/authorize', pdsUrl)
+      authorizeUrl.searchParams.set('request_uri', requestUri)
+      authorizeUrl.searchParams.set('client_id', clientId)
 
       res.setHeader('Cache-Control', 'no-store')
-      res.redirect(303, redirectUrl.toString())
+      res.redirect(303, authorizeUrl.toString())
 
-      logger.info({ did, redirectUri }, 'Auth code issued')
+      logger.info(
+        { did, clientId, isNewAccount },
+        'ePDS callback: redirecting to stock /oauth/authorize for consent/approval',
+      )
     } catch (err) {
       logger.error({ err }, 'ePDS callback error')
 
@@ -416,17 +503,43 @@ async function main() {
     next()
   }
 
-  // Insert at position 0 in the Express middleware stack so it runs before
-  // the stock authRoutes middleware that serves the pre-serialized metadata.
+  // Rewrite sec-fetch-site: same-site → same-origin for GET /oauth/authorize.
+  //
+  // PR #21 changed epds-callback to redirect through the stock
+  // @atproto/oauth-provider /oauth/authorize endpoint. The browser tags that
+  // redirect as `same-site` (auth subdomain → PDS origin), but the upstream
+  // oauth-provider rejects `same-site` — it only accepts `same-origin`,
+  // `cross-site`, or `none`.
+  //
+  // We rewrite only when the referer is the auth subdomain, the PDS itself,
+  // or absent (no referer). Unknown same-site origins are left untouched to
+  // preserve the security boundary.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express middleware injected into raw stack
+  const secFetchSiteRewrite = (req: any, _res: any, next: any) => {
+    if (
+      shouldRewriteSecFetchSite({
+        method: req.method,
+        path: req.path,
+        secFetchSite: req.headers['sec-fetch-site'],
+        referer: req.headers['referer'],
+        authOrigin: `https://${authHostname}`,
+        pdsOrigin: pdsUrl,
+      })
+    ) {
+      req.headers['sec-fetch-site'] = 'same-origin'
+    }
+    next()
+  }
+
+  // Insert both middlewares at position 0 in the Express middleware stack so
+  // they run before the stock authRoutes middleware. Register them both, then
+  // pop and splice each one in, in reverse registration order so that
+  // secFetchSiteRewrite ends up at insertIdx and asMetadataOverride follows.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessing Express internal _router stack
   const stack = (pds.app as any)._router?.stack
   if (stack) {
-    // Create a Layer-like entry by temporarily registering and then moving it
-    pds.app.use(asMetadataOverride)
-    const layer = stack.pop()
-    // Insert after query (0) and expressInit (1) so req.path is available,
+    // Find expressInit and insert right after it so req.path is available,
     // but before the authRoutes router that serves stock OAuth metadata.
-    // Find expressInit and insert right after it.
     let insertIdx = 0
     for (let i = 0; i < stack.length; i++) {
       if (stack[i].name === 'expressInit') {
@@ -434,8 +547,16 @@ async function main() {
         break
       }
     }
-    stack.splice(insertIdx, 0, layer)
-    logger.info('AS metadata override installed')
+
+    pds.app.use(asMetadataOverride)
+    const metadataLayer = stack.pop()
+
+    pds.app.use(secFetchSiteRewrite)
+    const secFetchLayer = stack.pop()
+
+    // Insert in order: secFetchSiteRewrite first, then asMetadataOverride
+    stack.splice(insertIdx, 0, secFetchLayer, metadataLayer)
+    logger.info('AS metadata override and sec-fetch-site rewrite installed')
   }
 
   // =========================================================================
@@ -523,6 +644,93 @@ async function main() {
     }
   })
 
+  // TEMPORARY debug endpoint for HYPER-270 investigation.
+  //
+  // Dumps all authorized_client and account_device rows for a given DID so
+  // we can observe which grants were (or weren't) persisted when a user
+  // clicks Authorize on the upstream consent UI for an untrusted client.
+  //
+  // Gated on EPDS_DEBUG_GRANTS=1 in addition to the usual
+  // EPDS_INTERNAL_SECRET check so it only comes online in environments
+  // where we've explicitly enabled it. Remove this endpoint and its env
+  // var before merging PR #21.
+  if (process.env.EPDS_DEBUG_GRANTS === '1') {
+    pds.app.get('/_internal/debug-grants', async (req, res) => {
+      if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+        res.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+      const sub = ((req.query.sub as string) || '').trim()
+      if (!sub) {
+        res.status(400).json({ error: 'Missing sub' })
+        return
+      }
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/pds accountManager internals not exported
+        const am = pds.ctx.accountManager as any
+        const db = am.db
+
+        const authorizedClients = await db.db
+          .selectFrom('authorized_client')
+          .select(['did', 'clientId', 'createdAt', 'updatedAt', 'data'])
+          .where('did', '=', sub)
+          .execute()
+
+        const accountDevices = await db.db
+          .selectFrom('account_device')
+          .select(['did', 'deviceId', 'createdAt', 'updatedAt'])
+          .where('did', '=', sub)
+          .execute()
+
+        res.json({ sub, authorizedClients, accountDevices })
+      } catch (err) {
+        logger.error({ err, sub }, 'debug-grants query failed')
+        res.status(500).json({ error: 'query_failed', message: String(err) })
+      }
+    })
+
+    // Also expose a "recent accounts" lookup so we can find the sub of the
+    // e2e test user without knowing its DID up front.
+    pds.app.get('/_internal/debug-recent-accounts', async (req, res) => {
+      if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+        res.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 5))
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const am = pds.ctx.accountManager as any
+        const db = am.db
+
+        // Join actor with account to pull the email too, so we can
+        // cross-reference e2e scenario test emails (e.g. the
+        // "approved-untrusted-<ts>@example.com" pattern) against the
+        // DID in the debug-grants lookup.
+        const rows = await db.db
+          .selectFrom('actor')
+          .leftJoin('account', 'account.did', 'actor.did')
+          .select([
+            'actor.did as did',
+            'actor.handle as handle',
+            'actor.createdAt as createdAt',
+            'account.email as email',
+          ])
+          .orderBy('actor.createdAt', 'desc')
+          .limit(limit)
+          .execute()
+
+        res.json({ rows })
+      } catch (err) {
+        logger.error({ err }, 'debug-recent-accounts query failed')
+        res.status(500).json({ error: 'query_failed', message: String(err) })
+      }
+    })
+
+    logger.warn(
+      'EPDS_DEBUG_GRANTS=1: /_internal/debug-grants and /_internal/debug-recent-accounts endpoints are enabled (HYPER-270 debugging)',
+    )
+  }
+
   // Protected internal endpoint for auth service to reset the inactivity timer
   // on a pending PAR request_uri. Called when the user loads the handle selection
   // page so the request doesn't expire while they are choosing a handle.
@@ -598,7 +806,7 @@ async function main() {
   })
 
   pds.app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'epds' })
+    res.json({ status: 'ok', service: 'epds', version: getEpdsVersion() })
   })
 
   await pds.start()

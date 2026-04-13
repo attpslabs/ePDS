@@ -28,6 +28,27 @@ pnpm lint                  # lint all files with ESLint
 pnpm lint:fix              # lint and auto-fix where possible
 ```
 
+## Documentation
+
+**Always update documentation when your changes would render existing docs
+inaccurate or incomplete.** This includes but is not limited to:
+
+- Adding, removing, or renaming environment variables → update
+  `docs/configuration.md`, relevant `.env.example` files, and
+  `scripts/setup.sh` (if the variable needs prompting or injection).
+- Changing build steps, Docker workflows, or CLI commands → update
+  `docs/deployment.md`, the Docker section below, and
+  `scripts/setup.sh` next-steps output if it references the changed
+  commands.
+- Adding new scripts or changing existing ones → update the Build / Dev
+  Commands section above.
+- Changing API endpoints, health responses, or OAuth flows → update
+  `docs/tutorial.md` or the relevant design doc.
+- Changing agent-facing workflows → update this file (`AGENTS.md`).
+
+Do not treat docs as a separate follow-up task. Update them in the same
+commit or PR as the code change.
+
 ## Test Commands
 
 ```bash
@@ -46,6 +67,35 @@ pnpm vitest run packages/shared
 
 Tests live in `packages/<name>/src/__tests__/`. There is no per-package test
 script — all tests are run from the root via vitest.
+
+### End-to-end tests in CI
+
+The e2e suite lives in `e2e/` and its feature files in `features/`. Normally
+the `E2E tests` workflow (`.github/workflows/e2e-tests.yml`) runs itself off
+Railway's `deployment_status` webhook — no action needed on an ordinary PR.
+
+To manually trigger it against a Railway environment (for e2e-only changes
+that don't cause a rebuild, or to re-run without a new commit), **always
+pass both `--ref` and `-f env_name`**:
+
+```bash
+# Against a PR environment:
+gh workflow run e2e-tests.yml \
+  --ref <your-branch> \
+  -f env_name="ePDS / ePDS-pr-<N>"
+
+# Against the persistent pr-base environment (post-merge backstop):
+gh workflow run e2e-tests.yml \
+  --ref main \
+  -f env_name="ePDS / pr-base"
+```
+
+`--ref` controls which version of the feature files, step definitions, and
+workflow YAML get checked out. Without it, `gh workflow run` defaults to
+`main` and you'll silently test old code against the right environment.
+See [`e2e/README.md`](e2e/README.md#running-the-ci-e2e-job-against-a-railway-environment)
+for details (env-name formats, URL derivation, how to handle missing Railway
+domains).
 
 ### Writing Tests
 
@@ -76,17 +126,42 @@ Follow these guidelines when adding tests:
 - **Ratchet thresholds** — after improving coverage, bump the thresholds in
   `vitest.config.ts` so coverage cannot regress.
 
+### Coverage Ratcheting Policy
+
+Coverage thresholds in `vitest.config.ts` must **only ever increase**.
+When a PR increases coverage above the current thresholds, the thresholds
+must be ratcheted up to the new floor (rounded down to the nearest integer)
+as part of the same PR. This ensures coverage can never regress.
+
+```bash
+pnpm test:coverage   # check current coverage vs thresholds
+```
+
+After confirming coverage exceeds thresholds, update `vitest.config.ts`:
+
+```ts
+thresholds: {
+  statements: <new floor>,
+  branches: <new floor>,
+  functions: <new floor>,
+  lines: <new floor>,
+},
+```
+
+**Never lower thresholds.** If a change removes tested code (e.g. deleting
+a feature), add tests for other code to compensate.
+
 ## Docker
 
 ```bash
-# Build images (always use --no-cache — cache busting is broken)
+# Build images — use pnpm docker:build to auto-stamp the version.
 # IMPORTANT: Only rebuild the services that changed. Check the diff to
 # determine which packages are affected, then pass service names:
-sudo -g docker bash -c "cd /data/projects/ePDS && docker compose build --no-cache auth"
-sudo -g docker bash -c "cd /data/projects/ePDS && docker compose build --no-cache core"
-sudo -g docker bash -c "cd /data/projects/ePDS && docker compose build --no-cache demo"
-# Only use bare 'docker compose build --no-cache' (all services) when
-# shared/ changed or you genuinely need to rebuild everything.
+sudo -g docker bash -c "cd /data/projects/ePDS && pnpm docker:build auth"
+sudo -g docker bash -c "cd /data/projects/ePDS && pnpm docker:build core"
+sudo -g docker bash -c "cd /data/projects/ePDS && pnpm docker:build demo"
+# Only use bare 'pnpm docker:build' (all services) when shared/ changed
+# or you genuinely need to rebuild everything.
 
 # Run the full stack
 sudo -g docker bash -c "cd /data/projects/ePDS && docker compose up -d"
@@ -188,6 +263,9 @@ import { AuthServiceContext } from './context.js'
 - SQLite via `better-sqlite3`. All DB access goes through `EpdsDb`
   (`packages/shared/src/db.ts`).
 - Schema changes use versioned migrations in `runMigrations()`.
+- **Never drop tables or columns in migrations.** Destructive schema changes
+  break emergency rollbacks — rolled-back code still references the dropped
+  schema and crashes. Leave unused tables/columns in place; they're harmless.
 - Do **not** directly read or modify `@atproto/pds` database tables — use
   `pds.ctx.accountManager.*` methods.
 
@@ -208,11 +286,51 @@ import { AuthServiceContext } from './context.js'
 - `bd export -o .beads/issues.jsonl` to export issues (commit this file).
 - Do **not** use `bd sync` (obsolete).
 
+## Releases & Changesets
+
+ePDS uses [Changesets](https://github.com/changesets/changesets) for versioning
+and release notes. The repo is treated as a **single release unit** even though
+the source is split across `packages/*`, via a `"workspaces": ["."]` field in
+the root `package.json` that scopes Changesets to the root `ePDS` package only.
+One `CHANGELOG.md` at the repo root, one `v<version>` git tag per release, one
+GitHub Release per release.
+
+- **When to add a changeset:** any user-facing or operator-facing change to the
+  three in-scope packages (`pds-core`, `auth-service`, `shared`). Skip for
+  internal refactors, tests-only, CI-only, docs-only, and the internal trust
+  boundary between `auth-service` and `pds-core` (HMAC callback signature,
+  `/_internal/` routes). If in doubt, add one.
+- **How to add a changeset:** `pnpm changeset` then rename the generated file
+  to something descriptive. Commit it in the same PR as the code change.
+- **Required format:** every changeset must have a `**Affects:**` line listing
+  audiences (End users, Client app developers, Operators — in that order). The
+  release workflow **fails hard** if any changeset in a release is missing
+  this line, because `scripts/changelog-audience-summary.mjs` can't generate
+  the "Who should read this release" block without it.
+- **Summary line:** the first non-frontmatter line is read by _every_ listed
+  audience (it appears in the aggregate summary block at the top of the
+  release section). If End users is one of the audiences, write the summary
+  in plain language — no OTP/DID/PAR/OAuth jargon, no field names, no
+  implementation concepts. Technical naming belongs in the per-audience
+  sections below.
+- **No H2/H3 headings** inside changeset bodies. `@changesets/changelog-github`
+  renders each changeset as a single indented bullet, and indented headings
+  break out of the list on GitHub's renderer. Use **bold inline labels**
+  (`**End users:**`, `**Operators:**`) instead.
+- **Full format reference:** `.agents/skills/writing-changesets/SKILL.md`
+  (also reachable via the `.claude/skills/writing-changesets/SKILL.md`
+  symlink). Contains the audience list, body structure rules, examples of
+  good and bad summaries, and the plain-language rule in detail.
+- **Cutting a release:** `docs/PUBLISHING.md` documents the release workflow
+  for maintainers — the two-phase "Version Packages PR" → "tag + GitHub
+  Release" flow via `.github/workflows/release.yml`.
+
 ## Key Gotchas
 
 - `docker compose restart` does **not** pick up `.env` changes — use
   `docker compose up -d`.
-- `docker compose build --no-cache` required (cache busting is broken for both images).
+- Use `pnpm docker:build` instead of bare `docker compose build` — it
+  stamps the ePDS version before building.
 - better-auth does **not** auto-migrate — `runBetterAuthMigrations()` must be
   called explicitly on startup.
 - New PDS accounts need a real password passed to `createAccount()` (use
@@ -220,9 +338,13 @@ import { AuthServiceContext } from './context.js'
   `registerAccount()` and leaves the `account` table empty, breaking
   `upsertDeviceAccount()` FK constraints.
 - Auth service must use `PDS_INTERNAL_URL` to reach pds-core over the internal
-  network (Docker: `http://core:3000`, Railway: `http://<service>.railway.internal:3000`).
-  Without it, internal API calls (par-login-hint, account-by-email) fall back to
-  the public URL which is unreachable from containers (no hairpin NAT).
+  network (Docker: `http://core:3000`, Railway:
+  `http://<service>.railway.internal:<PDS_PORT>` substituting whichever port
+  pds-core is actually configured to listen on). The URL must include the
+  `http://` or `https://` scheme — `requireInternalEnv()` rejects bare hostnames
+  at startup. Without `PDS_INTERNAL_URL`, internal API calls (par-login-hint,
+  account-by-email) fall back to the public URL which is unreachable from
+  containers (no hairpin NAT).
 - Caddy's on-demand TLS `ask` URL and reverse proxy upstreams must use the
   Docker Compose service name (`core`, `auth`) — if you rename services, update
   `Caddyfile` defaults too or Caddy will refuse all TLS connections.

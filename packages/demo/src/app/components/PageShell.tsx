@@ -42,6 +42,17 @@ export function PageShell({ children }: PageShellProps) {
           </h1>
         </div>
         {children}
+        {process.env.NEXT_PUBLIC_EPDS_VERSION && (
+          <p
+            style={{
+              marginTop: '32px',
+              fontSize: '12px',
+              color: '#999',
+            }}
+          >
+            ePDS {process.env.NEXT_PUBLIC_EPDS_VERSION}
+          </p>
+        )}
       </div>
     </div>
   )
