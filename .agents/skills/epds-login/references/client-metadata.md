@@ -4,7 +4,42 @@ Your app must host a JSON document at a publicly accessible HTTPS URL.
 This URL is also your `client_id`. ePDS fetches it to validate your app
 and the auth service uses it for branding (name, logo, email templates).
 
-## Minimal example
+## Choosing a client authentication method
+
+Before you copy the examples below, decide whether your app will be a
+**confidential client** (recommended) or a **public client**. The choice
+is recorded in `token_endpoint_auth_method` and has a significant
+user-visible consequence.
+
+**Confidential client — `token_endpoint_auth_method: "private_key_jwt"`:**
+your app holds a private key, publishes the matching public key as a JWKS
+document, and signs a short-lived `client_assertion` JWT on every PAR and
+token request. The PDS can verify that requests genuinely come from your
+server. Under this mode, the PDS will remember a user's consent decision
+and skip the consent screen on subsequent logins for the same (user,
+client) pair as long as the requested scopes are a subset of what was
+previously granted.
+
+**Public client — `token_endpoint_auth_method: "none"`:** your app holds
+no secret. This is simpler to set up but has an important downside: the
+upstream `@atproto/oauth-provider` considers any public client that is
+neither in the PDS's `PDS_OAUTH_TRUSTED_CLIENTS` allow-list nor marked
+first-party to be untrusted enough that it forces `prompt=consent` on
+every authorize request. Previously-stored grants are never honoured.
+This is a deliberate atproto security property — a public web page has
+no way to prove it is still the legitimate instance of your client, so
+every session must start with an explicit human consent click. See
+[HYPER-270](https://linear.app/hypercerts/issue/HYPER-270/epds-does-not-remember-previously-authorized-oauth-clients#comment-b8d80c72)
+for the full root-cause analysis.
+
+**Recommendation:** use `private_key_jwt` for anything users will sign in
+to more than once. Use `none` only for local development scaffolding,
+one-off scripts, or apps where the per-login consent screen is genuinely
+desired behaviour. The rest of this file shows the `private_key_jwt`
+form as the default; see [Public client metadata](#public-client-metadata)
+at the end for the shorter `none` variant.
+
+## Minimal example (confidential client)
 
 ```json
 {
@@ -14,29 +49,37 @@ and the auth service uses it for branding (name, logo, email templates).
   "scope": "atproto transition:generic",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
-  "token_endpoint_auth_method": "none",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "token_endpoint_auth_signing_alg": "ES256",
+  "jwks_uri": "https://yourapp.example.com/jwks.json",
   "dpop_bound_access_tokens": true
 }
 ```
 
+The `jwks_uri` must return a JWKS document containing the public half of
+the ES256 keypair you use to sign `client_assertion` JWTs — see
+[Publishing the JWKS document](#publishing-the-jwks-document) below.
+
 ## All supported fields
 
-| Field                        | Required | Description                                                       |
-| ---------------------------- | -------- | ----------------------------------------------------------------- |
-| `client_id`                  | Yes      | Must match the URL where this file is hosted                      |
-| `client_name`                | Yes      | Shown on the login page and in OTP emails                         |
-| `redirect_uris`              | Yes      | Array of allowed callback URLs after login                        |
-| `scope`                      | Yes      | Always `"atproto transition:generic"`                             |
-| `grant_types`                | Yes      | Always `["authorization_code", "refresh_token"]`                  |
-| `response_types`             | Yes      | Always `["code"]`                                                 |
-| `token_endpoint_auth_method` | Yes      | Always `"none"` (public client)                                   |
-| `dpop_bound_access_tokens`   | Yes      | Always `true`                                                     |
-| `client_uri`                 | No       | Your app's homepage URL                                           |
-| `logo_uri`                   | No       | URL to your app logo (shown on login page)                        |
-| `email_template_uri`         | No       | URL to a custom OTP email HTML template                           |
-| `email_subject_template`     | No       | Custom email subject line with `{{code}}` placeholder             |
-| `brand_color`                | No       | Hex colour for buttons and input focus rings (default: `#1A130F`) |
-| `background_color`           | No       | Hex colour for the login page background (default: `#F2EBE4`)     |
+| Field                             | Required    | Description                                                                           |
+| --------------------------------- | ----------- | ------------------------------------------------------------------------------------- |
+| `client_id`                       | Yes         | Must match the URL where this file is hosted                                          |
+| `client_name`                     | Yes         | Shown on the login page and in OTP emails                                             |
+| `redirect_uris`                   | Yes         | Array of allowed callback URLs after login                                            |
+| `scope`                           | Yes         | Always `"atproto transition:generic"`                                                 |
+| `grant_types`                     | Yes         | Always `["authorization_code", "refresh_token"]`                                      |
+| `response_types`                  | Yes         | Always `["code"]`                                                                     |
+| `token_endpoint_auth_method`      | Yes         | `"private_key_jwt"` (recommended) or `"none"` — see above                             |
+| `token_endpoint_auth_signing_alg` | Conditional | Required when `token_endpoint_auth_method` is `"private_key_jwt"`. Must be `"ES256"`. |
+| `jwks_uri`                        | Conditional | Required when `token_endpoint_auth_method` is `"private_key_jwt"`. Public JWKS URL.   |
+| `dpop_bound_access_tokens`        | Yes         | Always `true`                                                                         |
+| `client_uri`                      | No          | Your app's homepage URL                                                               |
+| `logo_uri`                        | No          | URL to your app logo (shown on login page)                                            |
+| `email_template_uri`              | No          | URL to a custom OTP email HTML template                                               |
+| `email_subject_template`          | No          | Custom email subject line with `{{code}}` placeholder                                 |
+| `brand_color`                     | No          | Hex colour for buttons and input focus rings (default: `#1A130F`)                     |
+| `background_color`                | No          | Hex colour for the login page background (default: `#F2EBE4`)                         |
 
 ## Custom email templates
 
@@ -73,6 +116,87 @@ Minimal template example:
 ```
 "email_subject_template": "{{code}} — Your {{app_name}} sign-in code"
 ```
+
+## Publishing the JWKS document
+
+When using `private_key_jwt`, your `jwks_uri` must serve a JSON Web Key
+Set containing the public half of the ES256 key pair you use to sign
+`client_assertion` JWTs.
+
+### Generate a key pair
+
+Use the `@atproto/jwk-jose` package (or any tool that produces an ES256
+JWK):
+
+```typescript
+import { JoseKey } from '@atproto/jwk-jose'
+
+// Generate a fresh ES256 key pair
+const key = await JoseKey.generate(['ES256'])
+
+// Export the private key for secure storage (never expose this)
+const privateJwk = key.privateJwk // { kty: "EC", crv: "P-256", x, y, d, kid }
+
+// The kid (key ID) is auto-generated — use the same kid in your JWKS
+console.log('kid:', privateJwk?.kid)
+```
+
+Store the private JWK securely (e.g. in an environment variable or secret
+manager). You will need it when constructing the `NodeOAuthClient` keyset.
+
+### Serve the JWKS endpoint
+
+Your `jwks_uri` must return a `{"keys": [...]}` document containing only
+the **public** half of each key. Strip the `d` parameter (the private
+component) before publishing:
+
+```typescript
+// Example: Express endpoint
+app.get('/jwks.json', (req, res) => {
+  const { d, ...publicJwk } = privateJwk // strip private component
+  res.json({ keys: [publicJwk] })
+})
+```
+
+The response must have `Content-Type: application/json`. ePDS fetches this
+URL when your app makes a PAR or token request with `client_assertion` to
+verify the signature.
+
+### Key rotation
+
+You can publish multiple keys in the `keys` array. ePDS matches by `kid`.
+To rotate:
+
+1. Generate a new key pair
+2. Add the new public key to the JWKS array
+3. Start signing with the new private key
+4. After all outstanding tokens expire, remove the old public key
+
+## Public client metadata
+
+If you are building a local development tool, one-off script, or app
+where forcing a consent screen on every login is acceptable, you can use
+the simpler public client form. See
+[Choosing a client authentication method](#choosing-a-client-authentication-method)
+above for the trade-offs.
+
+```json
+{
+  "client_id": "https://yourapp.example.com/client-metadata.json",
+  "client_name": "Your App Name",
+  "redirect_uris": ["https://yourapp.example.com/api/oauth/callback"],
+  "scope": "atproto transition:generic",
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "dpop_bound_access_tokens": true
+}
+```
+
+No `jwks_uri`, `token_endpoint_auth_signing_alg`, or key management
+required. The trade-off: the PDS will force a consent screen on every
+login unless your `client_id` is in the PDS's `PDS_OAUTH_TRUSTED_CLIENTS`
+allow-list.
 
 ## Local development
 

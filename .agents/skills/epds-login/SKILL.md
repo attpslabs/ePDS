@@ -1,6 +1,6 @@
 ---
 name: epds-login
-description: Implement AT Protocol OAuth login against an ePDS instance. Use when building passwordless OTP login flows, PAR requests, DPoP proofs, token exchange against ePDS (extended PDS from Certified). Covers Flow 1 (app has email form, passes login_hint) and Flow 2 (auth server collects email).
+description: Implement AT Protocol OAuth login against an ePDS instance. Covers four flows — Flow 1 (email-first, hand-rolled PAR/DPoP) and Flows 2–4 (no hint / handle / DID, via @atproto/oauth-client-node). Use when building passwordless OTP login, configuring client metadata (confidential vs public), or integrating NodeOAuthClient.
 ---
 
 # Implementing ePDS Login
@@ -15,25 +15,34 @@ AT Protocol universe (a DID, a handle, a data repository) automatically provisio
 From your app's perspective, ePDS uses standard AT Protocol OAuth (PAR + PKCE + DPoP).
 The reference implementation is `packages/demo` in the [ePDS repository](https://github.com/hypercerts-org/ePDS).
 
-## Two Flows
+## Four Flows
 
-|                         | Flow 1                | Flow 2           |
-| ----------------------- | --------------------- | ---------------- |
-| **App collects email?** | Yes                   | No               |
-| **PAR includes**        | Nothing extra         | Nothing extra    |
-| **Auth server shows**   | OTP input directly    | Email form first |
-| **Redirect includes**   | `&login_hint=<email>` | Nothing extra    |
+| Flow | App provides       | How user starts                 | Implementation       |
+| ---- | ------------------ | ------------------------------- | -------------------- |
+| 1    | Email address      | OTP screen immediately          | Hand-rolled PAR/DPoP |
+| 2    | Nothing            | Auth server shows email form    | `NodeOAuthClient`    |
+| 3    | AT Protocol handle | Auth server resolves, sends OTP | `NodeOAuthClient`    |
+| 4    | DID                | Auth server resolves, sends OTP | `NodeOAuthClient`    |
 
-> **Important:** `login_hint` must **never** go in the PAR body when the value is an
-> email address. The PDS core (AT Protocol layer) validates `login_hint` as an ATProto
-> identity (handle like `user.bsky.social` or DID like `did:plc:…`) and rejects email
-> addresses with `Invalid login_hint`. Put `login_hint` only on the **auth redirect URL**
-> — that request goes to the ePDS auth service (Better Auth layer), which accepts emails
-> and uses them to skip the email-collection step.
+**Why the split?** `@atproto/oauth-client-node`'s `authorize()` method accepts
+a handle or DID as input but explicitly omits `login_hint` from its options —
+the library resolves the identity itself and overrides the hint. Flow 1 needs
+to pass a raw email as `login_hint` on the auth redirect URL (not in the PAR
+body), which the library cannot do. Flow 1 must therefore use hand-rolled
+PAR + DPoP requests.
 
-## Quick Start
+> **Important:** `login_hint` must **never** go in the PAR body when the value
+> is an email address. The PDS core validates `login_hint` as an ATProto
+> identity (handle or DID) and rejects emails with `Invalid login_hint`. Put
+> email `login_hint` only on the **auth redirect URL** — that request goes to
+> the ePDS auth service (Better Auth layer), which accepts emails.
 
-### 1. Client Metadata
+## Quick Start — Flows 2/3/4 (recommended)
+
+Use `@atproto/oauth-client-node` for any flow that does not require passing a
+raw email as `login_hint`.
+
+### 1. Client Metadata (confidential client)
 
 Host at your `client_id` URL (must be HTTPS in production):
 
@@ -45,153 +54,148 @@ Host at your `client_id` URL (must be HTTPS in production):
   "scope": "atproto transition:generic",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
-  "token_endpoint_auth_method": "none",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "token_endpoint_auth_signing_alg": "ES256",
+  "jwks_uri": "https://yourapp.example.com/jwks.json",
   "dpop_bound_access_tokens": true
 }
 ```
 
-Optional branding fields: `logo_uri`, `email_template_uri`, `email_subject_template`,
-`brand_color`, `background_color`.
+See [client-metadata.md](references/client-metadata.md) for all fields,
+the force-consent gotcha with public clients (HYPER-270), and JWKS
+publishing instructions.
 
-### 2. Login Handler
-
-```typescript
-// GET /api/oauth/login?email=user@example.com  (Flow 1)
-// GET /api/oauth/login                         (Flow 2)
-
-const { privateKey, publicJwk, privateJwk } = generateDpopKeyPair()
-const codeVerifier = generateCodeVerifier()
-const codeChallenge = generateCodeChallenge(codeVerifier)
-const state = generateState()
-
-const parBody = new URLSearchParams({
-  client_id: clientId,
-  redirect_uri: redirectUri,
-  response_type: 'code',
-  scope: 'atproto transition:generic',
-  state,
-  code_challenge: codeChallenge,
-  code_challenge_method: 'S256',
-})
-
-// PAR always requires a DPoP nonce retry — handle it:
-let parRes = await fetch(PAR_ENDPOINT, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    DPoP: createDpopProof({
-      privateKey,
-      jwk: publicJwk,
-      method: 'POST',
-      url: PAR_ENDPOINT,
-    }),
-  },
-  body: parBody.toString(),
-})
-if (!parRes.ok) {
-  const nonce = parRes.headers.get('dpop-nonce')
-  if (nonce && parRes.status === 400) {
-    parRes = await fetch(PAR_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        DPoP: createDpopProof({
-          privateKey,
-          jwk: publicJwk,
-          method: 'POST',
-          url: PAR_ENDPOINT,
-          nonce,
-        }),
-      },
-      body: parBody.toString(),
-    })
-  }
-}
-
-const { request_uri } = await parRes.json()
-
-// Save state in signed HttpOnly cookie (maxAge: 600 to match request_uri lifetime)
-const loginHintParam = email ? `&login_hint=${encodeURIComponent(email)}` : ''
-const authUrl = `${AUTH_ENDPOINT}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(request_uri)}${loginHintParam}`
-// redirect to authUrl
-```
-
-### 3. Callback Handler
+### 2. Create the OAuth client
 
 ```typescript
-// GET /api/oauth/callback?code=...&state=...
+import { NodeOAuthClient } from '@atproto/oauth-client-node'
+import { JoseKey } from '@atproto/jwk-jose'
 
-const {
-  codeVerifier,
-  dpopPrivateJwk,
-  state: savedState,
-} = getSessionFromCookie()
-if (params.state !== savedState) throw new Error('state mismatch')
+const privateJwk = JSON.parse(process.env.OAUTH_PRIVATE_KEY!)
 
-const { privateKey, publicJwk } = restoreDpopKeyPair(dpopPrivateJwk)
-
-// Token exchange — also requires DPoP nonce retry:
-let tokenRes = await fetch(TOKEN_ENDPOINT, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    DPoP: createDpopProof({
-      privateKey,
-      jwk: publicJwk,
-      method: 'POST',
-      url: TOKEN_ENDPOINT,
-    }),
+const client = new NodeOAuthClient({
+  clientMetadata: {
+    client_id: 'https://yourapp.example.com/client-metadata.json',
+    client_name: 'Your App',
+    redirect_uris: ['https://yourapp.example.com/api/oauth/callback'],
+    scope: 'atproto transition:generic',
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+    token_endpoint_auth_method: 'private_key_jwt',
+    token_endpoint_auth_signing_alg: 'ES256',
+    jwks_uri: 'https://yourapp.example.com/jwks.json',
+    dpop_bound_access_tokens: true,
   },
-  body: new URLSearchParams({
-    grant_type: 'authorization_code',
-    code,
-    redirect_uri: redirectUri,
-    client_id: clientId,
-    code_verifier: codeVerifier,
-  }).toString(),
-})
-if (!tokenRes.ok) {
-  const nonce = tokenRes.headers.get('dpop-nonce')
-  if (nonce) {
-    tokenRes = await fetch(TOKEN_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        DPoP: createDpopProof({
-          privateKey,
-          jwk: publicJwk,
-          method: 'POST',
-          url: TOKEN_ENDPOINT,
-          nonce,
-        }),
-      },
-      body: /* same body */ '',
-    })
-  }
-}
+  keyset: [await JoseKey.fromImportable(privateJwk, privateJwk.kid)],
 
-const { sub: userDid } = await tokenRes.json()
-// sub is a DID e.g. "did:plc:abc123..." — resolve to handle via PLC directory
+  stateStore: {
+    async set(key, value) {
+      /* store in DB/Redis */
+    },
+    async get(key) {
+      /* retrieve */
+    },
+    async del(key) {
+      /* delete */
+    },
+  },
+  sessionStore: {
+    async set(key, value) {
+      /* store in DB/Redis */
+    },
+    async get(key) {
+      /* retrieve */
+    },
+    async del(key) {
+      /* delete */
+    },
+  },
+})
 ```
+
+### 3. Login handler
+
+```typescript
+// Flow 2: no identifier — auth server shows email form
+const authUrl = await client.authorize('https://pds.example.com')
+
+// Flow 3: pass a handle — auth server resolves and sends OTP
+const authUrl = await client.authorize('alice.pds.example.com')
+
+// Flow 4: pass a DID — same as handle
+const authUrl = await client.authorize('did:plc:abc123...')
+```
+
+Redirect the user's browser to `authUrl`.
+
+### 4. Callback handler
+
+```typescript
+const { session, state } = await client.callback(
+  new URLSearchParams(callbackQueryString),
+)
+// session.did — the user's DID (e.g. "did:plc:abc123...")
+// session.fetchHandler() — authenticated fetch for AT Protocol API calls
+```
+
+### 5. Restore a session
+
+```typescript
+const session = await client.restore(userDid)
+// Use session.fetchHandler() for API calls
+```
+
+### 6. Serve library endpoints
+
+The library expects two endpoints to be publicly reachable — your
+`client_id` URL and your `jwks_uri`. You can serve them from the
+`NodeOAuthClient` instance:
+
+```typescript
+app.get('/client-metadata.json', (req, res) => {
+  res.json(client.clientMetadata)
+})
+
+app.get('/jwks.json', (req, res) => {
+  res.json(client.jwks)
+})
+```
+
+## Quick Start — Flow 1 (hand-rolled)
+
+Flow 1 requires hand-rolled PAR and token exchange because the library
+cannot pass a raw email as `login_hint`. See
+[references/flows.md](references/flows.md) for the full walkthrough and
+[references/dpop-pkce.md](references/dpop-pkce.md) for the helper
+functions.
+
+The abbreviated version:
+
+1. Generate DPoP key pair and PKCE verifier
+2. POST to `/oauth/par` (with DPoP nonce retry)
+3. Redirect browser to `/oauth/authorize?...&login_hint=<email>`
+4. Handle callback: verify state, exchange code for tokens (with DPoP nonce retry)
 
 ## Common Pitfalls
 
-| Pitfall                        | Fix                                                                                            |
-| ------------------------------ | ---------------------------------------------------------------------------------------------- |
-| Flash of email form            | Include `login_hint` on the **auth redirect URL only** (never in the PAR body)                 |
-| `Invalid login_hint` from PAR  | Remove `login_hint` from the PAR body — PDS core only accepts ATProto handles/DIDs, not emails |
-| `auth_failed` immediately      | Check Caddy logs — likely a DNS/upstream name mismatch                                         |
-| DPoP rejected                  | Always implement the nonce retry loop (ePDS always demands a nonce)                            |
-| `Cannot find package` in tests | Run `pnpm build` before `pnpm test` — vitest needs `dist/`                                     |
-| Token exchange fails           | Restore the DPoP key pair from the session cookie, don't generate a new one                    |
-| Double OTP email               | Normal on duplicate GET — `otpAlreadySent` flag suppresses auto-send on reload                 |
+| Pitfall                            | Fix                                                                                           |
+| ---------------------------------- | --------------------------------------------------------------------------------------------- |
+| Consent screen on every login      | Switch to `private_key_jwt` — public clients force consent unless trusted (see [HYPER-270])   |
+| Flash of email form (Flow 1)       | Include `login_hint` on the **auth redirect URL only** (never in the PAR body)                |
+| `Invalid login_hint` from PAR      | Remove `login_hint` from the PAR body — PDS core only accepts handles/DIDs, not emails        |
+| `auth_failed` immediately          | Check Caddy logs — likely a DNS/upstream name mismatch                                        |
+| DPoP rejected (hand-rolled only)   | Always implement the nonce retry loop (ePDS always demands a nonce)                           |
+| Token exchange fails (hand-rolled) | Restore the DPoP key pair from the session cookie, don't generate a new one                   |
+| `Cannot find package` in tests     | Run `pnpm build` before `pnpm test` — vitest needs `dist/`                                    |
+| `NodeOAuthClient` callback 401     | Ensure `stateStore` and `sessionStore` persist across requests (not in-memory for serverless) |
+
+[HYPER-270]: https://linear.app/hypercerts/issue/HYPER-270/epds-does-not-remember-previously-authorized-oauth-clients#comment-b8d80c72
 
 ## Handles
 
-ePDS generates random handles, not email-derived ones. When a user signs up
-with `alice@example.com`, their handle will be something like `a3x9kf.pds.example`
-(random prefix + PDS hostname), not `alice.pds.example`. Resolve the handle
-from the DID via the PLC directory after login (shown in the callback handler).
+New users choose their own handle during signup (e.g. `alice.pds.example.com`).
+The local part must be 5–20 characters, alphanumeric with hyphens. Handles are
+not derived from the user's email address, for privacy.
 
 ## ePDS Endpoints (defaults)
 
@@ -203,6 +207,6 @@ Token: https://<pds-hostname>/oauth/token
 
 ## Reference Files
 
-- [PKCE and DPoP helpers](references/dpop-pkce.md) — full TypeScript implementations
-- [Client metadata fields](references/client-metadata.md) — all supported fields including email branding
-- [Full flow walkthrough](references/flows.md) — sequence diagrams and step-by-step for both flows
+- [Client metadata fields](references/client-metadata.md) — confidential vs public, JWKS, all fields, email branding
+- [Full flow walkthrough](references/flows.md) — sequence diagrams, Flow 1 hand-rolled code, Flows 2–4 library code
+- [PKCE and DPoP helpers](references/dpop-pkce.md) — Flow 1 only; Flows 2–4 should use `NodeOAuthClient` instead
