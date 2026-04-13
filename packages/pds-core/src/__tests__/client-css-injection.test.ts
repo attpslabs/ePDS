@@ -3,9 +3,14 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   appendStyleHashToCsp,
   createClientCssInjectionMiddleware,
+  findInsertionIndex,
   injectStyleTagIntoHtml,
   shouldInjectClientCss,
 } from '../lib/client-css-injection.js'
+
+function mockLogger() {
+  return { info: vi.fn(), warn: vi.fn(), debug: vi.fn() }
+}
 
 describe('shouldInjectClientCss', () => {
   const trustedClients = ['https://trusted.app/client-metadata.json']
@@ -134,7 +139,7 @@ describe('createClientCssInjectionMiddleware', () => {
       trustedClients: [trustedClient],
       resolveClientMetadata: vi.fn(),
       getClientCss: vi.fn(),
-      logger: { warn: vi.fn() },
+      logger: mockLogger(),
     })
     const req = { method: 'POST', path: '/oauth/authorize', query: {} }
     const { res } = createResponseDouble()
@@ -151,7 +156,7 @@ describe('createClientCssInjectionMiddleware', () => {
       trustedClients: [trustedClient],
       resolveClientMetadata,
       getClientCss,
-      logger: { warn: vi.fn() },
+      logger: mockLogger(),
     })
     const req = {
       method: 'GET',
@@ -172,7 +177,7 @@ describe('createClientCssInjectionMiddleware', () => {
       trustedClients: [trustedClient],
       resolveClientMetadata: vi.fn().mockResolvedValue({}),
       getClientCss: vi.fn().mockReturnValue('body { color: red; }'),
-      logger: { warn: vi.fn() },
+      logger: mockLogger(),
     })
     const req = {
       method: 'GET',
@@ -209,7 +214,7 @@ describe('createClientCssInjectionMiddleware', () => {
       trustedClients: [trustedClient],
       resolveClientMetadata: vi.fn().mockResolvedValue({}),
       getClientCss: vi.fn().mockReturnValue('body { color: red; }'),
-      logger: { warn: vi.fn() },
+      logger: mockLogger(),
     })
     const req = {
       method: 'GET',
@@ -225,12 +230,12 @@ describe('createClientCssInjectionMiddleware', () => {
   })
 
   it('logs warning and continues when metadata resolution fails', async () => {
-    const warn = vi.fn()
+    const logger = mockLogger()
     const middleware = createClientCssInjectionMiddleware({
       trustedClients: [trustedClient],
       resolveClientMetadata: vi.fn().mockRejectedValue(new Error('boom')),
       getClientCss: vi.fn(),
-      logger: { warn },
+      logger,
     })
     const req = {
       method: 'GET',
@@ -241,7 +246,38 @@ describe('createClientCssInjectionMiddleware', () => {
     const next = vi.fn()
 
     await middleware(req, res, next)
-    expect(warn).toHaveBeenCalledOnce()
+    expect(logger.warn).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledOnce()
+  })
+})
+
+describe('findInsertionIndex', () => {
+  it('returns index after compression when present', () => {
+    const stack = [
+      { name: 'query' },
+      { name: 'expressInit' },
+      { name: 'compression' },
+      { name: 'router' },
+    ]
+    expect(findInsertionIndex(stack)).toBe(3)
+  })
+
+  it('falls back to after expressInit when compression is absent', () => {
+    const stack = [
+      { name: 'query' },
+      { name: 'expressInit' },
+      { name: 'router' },
+    ]
+    expect(findInsertionIndex(stack)).toBe(2)
+  })
+
+  it('returns 0 when neither compression nor expressInit is found', () => {
+    const stack = [{ name: 'router' }, { name: 'other' }]
+    expect(findInsertionIndex(stack)).toBe(0)
+  })
+
+  it('accepts custom preferAfter and fallbackAfter names', () => {
+    const stack = [{ name: 'a' }, { name: 'myMiddleware' }, { name: 'b' }]
+    expect(findInsertionIndex(stack, 'myMiddleware', 'a')).toBe(2)
   })
 })
