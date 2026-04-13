@@ -28,9 +28,10 @@ first-party to be untrusted enough that it forces `prompt=consent` on
 every authorize request. Previously-stored grants are never honoured.
 This is a deliberate atproto security property — a public web page has
 no way to prove it is still the legitimate instance of your client, so
-every session must start with an explicit human consent click. See
-[HYPER-270](https://linear.app/hypercerts/issue/HYPER-270/epds-does-not-remember-previously-authorized-oauth-clients#comment-b8d80c72)
-for the full root-cause analysis.
+every session must start with an explicit human consent click. The
+root cause is in `@atproto/oauth-provider`'s `isFirstPartyClient()`
+check — see `packages/oauth/oauth-provider/src/client/client-manager.ts`
+in the atproto repository.
 
 **Recommendation:** use `private_key_jwt` for anything users will sign in
 to more than once. Use `none` only for local development scaffolding,

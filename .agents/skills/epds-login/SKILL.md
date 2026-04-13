@@ -62,7 +62,7 @@ Host at your `client_id` URL (must be HTTPS in production):
 ```
 
 See [client-metadata.md](references/client-metadata.md) for all fields,
-the force-consent gotcha with public clients (HYPER-270), and JWKS
+the force-consent gotcha with public clients, and JWKS
 publishing instructions.
 
 ### 2. Create the OAuth client
@@ -180,7 +180,7 @@ The abbreviated version:
 
 | Pitfall                            | Fix                                                                                           |
 | ---------------------------------- | --------------------------------------------------------------------------------------------- |
-| Consent screen on every login      | Switch to `private_key_jwt` — public clients force consent unless trusted (see [HYPER-270])   |
+| Consent screen on every login      | Switch to `private_key_jwt` — public clients force consent unless in the PDS trusted list     |
 | Flash of email form (Flow 1)       | Include `login_hint` on the **auth redirect URL only** (never in the PAR body)                |
 | `Invalid login_hint` from PAR      | Remove `login_hint` from the PAR body — PDS core only accepts handles/DIDs, not emails        |
 | `auth_failed` immediately          | Check Caddy logs — likely a DNS/upstream name mismatch                                        |
@@ -188,8 +188,6 @@ The abbreviated version:
 | Token exchange fails (hand-rolled) | Restore the DPoP key pair from the session cookie, don't generate a new one                   |
 | `Cannot find package` in tests     | Run `pnpm build` before `pnpm test` — vitest needs `dist/`                                    |
 | `NodeOAuthClient` callback 401     | Ensure `stateStore` and `sessionStore` persist across requests (not in-memory for serverless) |
-
-[HYPER-270]: https://linear.app/hypercerts/issue/HYPER-270/epds-does-not-remember-previously-authorized-oauth-clients#comment-b8d80c72
 
 ## Handles
 
