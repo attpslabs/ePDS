@@ -19,10 +19,7 @@ import type { AuthServiceContext } from '../context.js'
 import type { BetterAuthInstance } from '../better-auth.js'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
-import {
-  setHeadlessClientId,
-  clearHeadlessClientId,
-} from '../better-auth.js'
+import { setHeadlessClientId, clearHeadlessClientId } from '../better-auth.js'
 import {
   authenticateApiKey,
   checkAllowedOrigin,
@@ -63,19 +60,27 @@ export function createHeadlessOtpRouter(
       return
     }
 
-    if (!checkAllowedOrigin(apiClient.allowedOrigins, req.headers.origin as string | undefined)) {
+    if (
+      !checkAllowedOrigin(
+        apiClient.allowedOrigins,
+        req.headers.origin,
+      )
+    ) {
       res.status(403).json({ error: 'OriginNotAllowed' })
       return
     }
 
-    if (!checkApiClientRateLimit(ctx.db, apiClient.id, apiClient.rateLimitPerHour)) {
+    if (
+      !checkApiClientRateLimit(ctx.db, apiClient.id, apiClient.rateLimitPerHour)
+    ) {
       res.status(429).json({ error: 'RateLimitExceeded' })
       return
     }
 
     const email = ((req.body?.email as string) || '').trim().toLowerCase()
     const purpose = (req.body?.purpose as string) || ''
-    const clientId = (req.body?.clientId as string) || apiClient.clientId || undefined
+    const clientId =
+      (req.body?.clientId as string) || apiClient.clientId || undefined
 
     if (!email || !purpose) {
       res.status(400).json({ error: 'email and purpose are required' })
@@ -100,7 +105,10 @@ export function createHeadlessOtpRouter(
       const did = await getDidByEmail(email, pdsUrl, internalSecret)
       if (!did) {
         // No account — return success but don't send email
-        logger.info({ email }, 'Headless OTP send: no account found (anti-enumeration)')
+        logger.info(
+          { email },
+          'Headless OTP send: no account found (anti-enumeration)',
+        )
         res.json({ success: true })
         return
       }
@@ -111,7 +119,10 @@ export function createHeadlessOtpRouter(
       // The actual conflict will be caught at verify-time (createAccount fails).
       const did = await getDidByEmail(email, pdsUrl, internalSecret)
       if (did) {
-        logger.info({ email }, 'Headless OTP send: email already registered (anti-enumeration)')
+        logger.info(
+          { email },
+          'Headless OTP send: email already registered (anti-enumeration)',
+        )
         res.json({ success: true })
         return
       }
@@ -150,12 +161,19 @@ export function createHeadlessOtpRouter(
       return
     }
 
-    if (!checkAllowedOrigin(apiClient.allowedOrigins, req.headers.origin as string | undefined)) {
+    if (
+      !checkAllowedOrigin(
+        apiClient.allowedOrigins,
+        req.headers.origin,
+      )
+    ) {
       res.status(403).json({ error: 'OriginNotAllowed' })
       return
     }
 
-    if (!checkApiClientRateLimit(ctx.db, apiClient.id, apiClient.rateLimitPerHour)) {
+    if (
+      !checkApiClientRateLimit(ctx.db, apiClient.id, apiClient.rateLimitPerHour)
+    ) {
       res.status(429).json({ error: 'RateLimitExceeded' })
       return
     }
@@ -250,7 +268,10 @@ async function handleLogin(
   )
   if (!resetRes.ok) {
     const error = await resetRes.text()
-    logger.error({ did, status: resetRes.status, error }, 'Failed to reset password')
+    logger.error(
+      { did, status: resetRes.status, error },
+      'Failed to reset password',
+    )
     throw new Error('Failed to authenticate account')
   }
 
@@ -265,7 +286,10 @@ async function handleLogin(
   )
   if (!sessionRes.ok) {
     const error = await sessionRes.text()
-    logger.error({ did, status: sessionRes.status, error }, 'Failed to create session')
+    logger.error(
+      { did, status: sessionRes.status, error },
+      'Failed to create session',
+    )
     throw new Error('Login failed')
   }
 
@@ -314,7 +338,10 @@ async function handleSignup(
   )
   if (!inviteRes.ok) {
     const error = await inviteRes.text()
-    logger.error({ status: inviteRes.status, error }, 'Failed to mint invite code')
+    logger.error(
+      { status: inviteRes.status, error },
+      'Failed to mint invite code',
+    )
     throw new Error('Account creation temporarily unavailable')
   }
   const { code: inviteCode } = (await inviteRes.json()) as { code: string }
@@ -344,7 +371,11 @@ async function handleSignup(
       InvalidHandle: 'Invalid handle format',
       EmailNotAvailable: 'An account with this email already exists',
     }
-    throw new Error(errorMessages[errorCode] || errorData.message || 'Account creation failed')
+    throw new Error(
+      errorMessages[errorCode] ||
+        errorData.message ||
+        'Account creation failed',
+    )
   }
 
   const session = (await createRes.json()) as {

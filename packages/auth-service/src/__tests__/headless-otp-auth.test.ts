@@ -4,6 +4,7 @@ import { EpdsDb } from '@certified-app/shared'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
+import type { Request } from 'express'
 import {
   authenticateApiKey,
   checkAllowedOrigin,
@@ -42,7 +43,7 @@ function hashKey(key: string): string {
 }
 
 function makeReq(headers: Record<string, string> = {}) {
-  return { headers } as unknown as import('express').Request
+  return { headers } as unknown as Request
 }
 
 function createTestClient(
@@ -114,14 +115,17 @@ describe('checkAllowedOrigin', () => {
 
   it('allows matching origin', () => {
     expect(
-      checkAllowedOrigin('https://example.com,https://other.com', 'https://example.com'),
+      checkAllowedOrigin(
+        'https://example.com,https://other.com',
+        'https://example.com',
+      ),
     ).toBe(true)
   })
 
   it('blocks mismatched origin', () => {
-    expect(
-      checkAllowedOrigin('https://example.com', 'https://evil.com'),
-    ).toBe(false)
+    expect(checkAllowedOrigin('https://example.com', 'https://evil.com')).toBe(
+      false,
+    )
   })
 })
 

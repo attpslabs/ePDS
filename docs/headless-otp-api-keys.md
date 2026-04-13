@@ -21,14 +21,14 @@ node scripts/create-api-client.mjs --name "MyApp" --db /path/to/epds.sqlite
 
 Options:
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--name <name>` | Client display name (required) | — |
-| `--client-id <url>` | client-metadata.json URL for email branding | none |
-| `--allowed-origins <list>` | Comma-separated allowed origins | all |
-| `--no-signup` | Disable account creation for this client | signup enabled |
-| `--rate-limit <n>` | Max requests per hour | 10000 |
-| `--db <path>` | Path to ePDS SQLite database | `./data/epds.sqlite` |
+| Flag                       | Description                                 | Default              |
+| -------------------------- | ------------------------------------------- | -------------------- |
+| `--name <name>`            | Client display name (required)              | —                    |
+| `--client-id <url>`        | client-metadata.json URL for email branding | none                 |
+| `--allowed-origins <list>` | Comma-separated allowed origins             | all                  |
+| `--no-signup`              | Disable account creation for this client    | signup enabled       |
+| `--rate-limit <n>`         | Max requests per hour                       | 10000                |
+| `--db <path>`              | Path to ePDS SQLite database                | `./data/epds.sqlite` |
 
 The script prints the API key once. Save it immediately — it cannot be retrieved later (only the SHA-256 hash is stored).
 
@@ -70,25 +70,38 @@ Content-Type: application/json
 ```
 
 Login response (200):
+
 ```json
-{ "did": "did:plc:...", "handle": "alice.self.surf", "accessJwt": "...", "refreshJwt": "..." }
+{
+  "did": "did:plc:...",
+  "handle": "alice.self.surf",
+  "accessJwt": "...",
+  "refreshJwt": "..."
+}
 ```
 
 Signup response (201):
+
 ```json
-{ "did": "did:plc:...", "handle": "alice.self.surf", "accessJwt": "...", "refreshJwt": "...", "created": true }
+{
+  "did": "did:plc:...",
+  "handle": "alice.self.surf",
+  "accessJwt": "...",
+  "refreshJwt": "...",
+  "created": true
+}
 ```
 
 ### Error responses
 
-| Status | Error | Meaning |
-|--------|-------|---------|
-| 401 | `Unauthorized` | Missing or invalid API key |
-| 403 | `OriginNotAllowed` | Request origin not in client's allowed list |
-| 403 | `SignupNotAllowed` | Client registered with `--no-signup` |
-| 429 | `RateLimitExceeded` | Client exceeded `rate_limit_per_hour` |
-| 400 | `InvalidCode` | Wrong OTP code |
-| 400 | validation errors | Missing required fields |
+| Status | Error               | Meaning                                     |
+| ------ | ------------------- | ------------------------------------------- |
+| 401    | `Unauthorized`      | Missing or invalid API key                  |
+| 403    | `OriginNotAllowed`  | Request origin not in client's allowed list |
+| 403    | `SignupNotAllowed`  | Client registered with `--no-signup`        |
+| 429    | `RateLimitExceeded` | Client exceeded `rate_limit_per_hour`       |
+| 400    | `InvalidCode`       | Wrong OTP code                              |
+| 400    | validation errors   | Missing required fields                     |
 
 ## Mobile app integration
 

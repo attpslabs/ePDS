@@ -62,7 +62,9 @@ const args = parseArgs(process.argv)
 
 if (!args.name) {
   console.error('Error: --name is required')
-  console.error('Usage: node scripts/create-api-client.mjs --name "CoolApp" [options]')
+  console.error(
+    'Usage: node scripts/create-api-client.mjs --name "CoolApp" [options]',
+  )
   process.exit(1)
 }
 
@@ -96,7 +98,9 @@ try {
   console.log(`  API Key:    ${apiKey}`)
   console.log()
   console.log('Save this API key now — it cannot be retrieved later.')
-  console.log('Use it in the x-api-key header when calling /_internal/otp/* endpoints.')
+  console.log(
+    'Use it in the x-api-key header when calling /_internal/otp/* endpoints.',
+  )
   console.log()
 } finally {
   db.close()
