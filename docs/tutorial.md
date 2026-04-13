@@ -317,6 +317,29 @@ The `/oauth/authorize` URL already carries `client_id` and `request_uri`,
 so use `&epds_handle_mode=...`, not `?`. Unknown or invalid values are
 silently ignored and fall through to the next source.
 
+#### Optional: skip consent on signup (trusted clients)
+
+If your app is listed in the PDS operator's `PDS_OAUTH_TRUSTED_CLIENTS`
+and the operator has enabled `PDS_SIGNUP_ALLOW_CONSENT_SKIP=true`, you
+can request that the consent screen be skipped when a new user signs up
+through your app. Add this to your client metadata:
+
+```json
+{
+  "epds_skip_consent_on_signup": true
+}
+```
+
+All three conditions must be met for the skip to take effect:
+
+1. The PDS has `PDS_SIGNUP_ALLOW_CONSENT_SKIP=true`
+2. Your `client_id` is in the PDS's `PDS_OAUTH_TRUSTED_CLIENTS` list
+3. Your client metadata includes `"epds_skip_consent_on_signup": true`
+
+The skip only applies to initial sign-up — returning users go through
+normal consent handling (which may still be auto-approved if they have
+already granted the requested scopes).
+
 ### Using `@atproto/oauth-client-node` (recommended for Flows 2–4)
 
 If your app does **not** need to pass a raw email as `login_hint` (i.e.
