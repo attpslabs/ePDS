@@ -586,20 +586,45 @@ async function main() {
       logger,
     })
 
-    // Insert into Express stack after expressInit (same approach as AS metadata)
+    // Insert into Express stack AFTER the compression middleware.
+    //
+    // The compression middleware (registered by @atproto/pds) wraps
+    // res.write / res.end to pipe through a zlib stream.  When
+    // compression is active, it calls the *original* res.end() with
+    // no arguments after writing compressed chunks via res.write().
+    // If the CSS middleware sits *before* compression, its res.end
+    // wrapper never sees the HTML body — it only sees the empty
+    // end() call that compression fires to signal completion.
+    //
+    // By placing the CSS middleware *after* compression, the wrapping
+    // order is:
+    //   handler → CSS wrapper (outermost) → compression wrapper → raw res.end
+    //
+    // So the CSS wrapper receives the uncompressed HTML, injects the
+    // <style> tag, and passes the modified HTML to compression for
+    // encoding.
     pds.app.use(cssInjectionMiddleware)
     const cssLayer = stack?.pop()
     if (stack && cssLayer) {
       let insertIdx = 0
       for (let i = 0; i < stack.length; i++) {
-        if (stack[i].name === 'expressInit') {
+        if (stack[i].name === 'compression') {
           insertIdx = i + 1
           break
         }
       }
+      // Fall back to after expressInit if compression layer not found
+      if (insertIdx === 0) {
+        for (let i = 0; i < stack.length; i++) {
+          if (stack[i].name === 'expressInit') {
+            insertIdx = i + 1
+            break
+          }
+        }
+      }
       stack.splice(insertIdx, 0, cssLayer)
       logger.info(
-        { trustedClients },
+        { trustedClients, insertIdx },
         'CSS injection middleware installed for trusted OAuth clients',
       )
     }
