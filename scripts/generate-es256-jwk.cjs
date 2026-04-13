@@ -3,15 +3,25 @@
 // Generate an ES256 (P-256) private JWK with a deterministic kid.
 // Output: compact JSON on stdout, suitable for EPDS_CLIENT_PRIVATE_JWK.
 //
-// The kid is a short hash of the public coordinates so the same keypair
-// always produces the same kid, matching how the runtime client-jwk.ts
-// helper derives it.
+// The kid is an RFC 7638 JWK thumbprint (SHA-256, base64url) of the
+// public key. The runtime client-jwk.ts uses the same thumbprint as a
+// fallback when no explicit kid is present, so keys generated here will
+// produce the same kid whether or not it's stripped and re-derived.
 
 const crypto = require('crypto')
 const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' })
 const jwk = privateKey.export({ format: 'jwk' })
-const h = crypto.createHash('sha256')
-h.update(jwk.x)
-h.update(jwk.y)
-jwk.kid = h.digest('base64url').slice(0, 16)
+
+// RFC 7638: canonical JSON with required public members in lexicographic order
+const thumbprintInput = JSON.stringify({
+  crv: jwk.crv,
+  kty: jwk.kty,
+  x: jwk.x,
+  y: jwk.y,
+})
+jwk.kid = crypto
+  .createHash('sha256')
+  .update(thumbprintInput)
+  .digest('base64url')
+
 process.stdout.write(JSON.stringify(jwk) + '\n')
