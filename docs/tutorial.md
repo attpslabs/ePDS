@@ -24,7 +24,7 @@ support passing a raw email as `login_hint`.
 Both flows end the same way: the user enters their code, ePDS redirects
 back to your app, and your app exchanges that redirect for a token.
 
-## Flow 1 — App passes email as `login_hint`
+## Flow 1 — App has its own email form
 
 1. User enters email in your app and clicks "Sign in" — or your app
    already knows the user's handle or DID from a previous session (see
@@ -41,7 +41,7 @@ back to your app, and your app exchanges that redirect for a token.
 9. Your callback handler exchanges the redirect for an access token
 10. User is logged in
 
-## Flow 2 — Using `NodeOAuthClient`
+## Flow 2 — App has a simple login button
 
 Flow 2 covers three input variants — all use the same code path:
 
@@ -62,7 +62,7 @@ Flow 2 covers three input variants — all use the same code path:
 
 ## Sequence Diagrams
 
-### Flow 1 — App passes email as `login_hint`
+### Flow 1 — App has its own email form
 
 ```mermaid
 sequenceDiagram
@@ -114,7 +114,7 @@ sequenceDiagram
     App-->>User: Logged in
 ```
 
-### Flow 2 — No identifier (via `NodeOAuthClient`)
+### Flow 2 — App has a simple login button (via `NodeOAuthClient`)
 
 ```mermaid
 sequenceDiagram
