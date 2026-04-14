@@ -88,12 +88,28 @@ const ocean: Theme = {
     // --branding-color-* custom props the UI reads through
     // `rgb(var(--branding-color-primary))`. Channels are space-separated.
     ':root { --branding-color-primary: 139 92 246; --branding-color-primary-contrast: 26 16 51; }',
-    // Background: auth-service pages use <body>, provider-UI puts its
-    // dark-mode body bg on <html class="dark">. Colour both.
-    'body, html { background: #1a1033; color: #e8e0f0; }',
-    // Provider-UI form card (.bg-white / .dark\\:bg-slate-800) and its
-    // dark-mode borders — keep card visibly distinct from page bg.
-    '.bg-white, [class*="dark:bg-slate"] { background: #251845 !important; }',
+    // Body background & primary text. Provider-UI sets these on <body>
+    // via `bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100`,
+    // so class-specific selectors (plus !important for dark-mode) are
+    // needed to override Tailwind's equal-specificity rules.
+    'body { background: #1a1033 !important; color: #e8e0f0 !important; }',
+    'html { background: #1a1033; }',
+    // Consent page's "left strip" header column (md:bg-slate-100
+    // md:dark:bg-slate-800) — paint it a shade lighter than body so
+    // it reads as a distinct surface, matching the demo's own cards.
+    '.md\\:bg-slate-100, .md\\:dark\\:bg-slate-800 { background-color: #251845 !important; }',
+    '.md\\:dark\\:border-slate-700 { border-color: #3d2a5c !important; }',
+    // Three-tone text hierarchy on the consent page. Provider-UI uses
+    // `text-slate-{100,200,300,400}` + `text-neutral-{400,500}` for
+    // primary / muted / hint text; remap to the theme's three shades.
+    '.text-slate-900, .dark\\:text-slate-100, .text-slate-800, .dark\\:text-slate-200, .text-gray-800, .dark\\:text-gray-200 { color: #e8e0f0 !important; }',
+    '.text-slate-700, .text-slate-600, .dark\\:text-slate-300, .dark\\:text-slate-400 { color: #a78bbd !important; }',
+    '.text-slate-500, .text-gray-500, .text-neutral-500, .dark\\:text-neutral-400, .dark\\:text-gray-300, .dark\\:text-gray-400 { color: #7c6894 !important; }',
+    // Consent page secondary buttons (Deny access etc.) default to
+    // .bg-gray-300 / .dark:bg-slate-600, which reads as a jarring
+    // slate-grey against the themed card. Tint them to a muted surface
+    // that harmonises with the palette.
+    '.bg-gray-300, .dark\\:bg-slate-600, .bg-gray-200, .dark\\:bg-gray-800, .dark\\:bg-gray-700 { background-color: #3d2a5c !important; color: #e8e0f0 !important; }',
     // auth-service hand-rolled markup
     '.container { background: #251845; box-shadow: 0 2px 12px rgba(0,0,0,0.4); }',
     'h1 { color: #e8e0f0; }',
@@ -147,12 +163,28 @@ const amber: Theme = {
     // --branding-color-* custom props the UI reads through
     // `rgb(var(--branding-color-primary))`. Channels are space-separated.
     ':root { --branding-color-primary: 245 158 11; --branding-color-primary-contrast: 26 18 8; }',
-    // Background: auth-service pages use <body>, provider-UI puts its
-    // dark-mode body bg on <html class="dark">. Colour both.
-    'body, html { background: #1a1208; color: #fef3c7; }',
-    // Provider-UI form card (.bg-white / .dark\\:bg-slate-800) and its
-    // dark-mode borders — keep card visibly distinct from page bg.
-    '.bg-white, [class*="dark:bg-slate"] { background: #2d2010 !important; }',
+    // Body background & primary text. Provider-UI sets these on <body>
+    // via `bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100`,
+    // so class-specific selectors (plus !important for dark-mode) are
+    // needed to override Tailwind's equal-specificity rules.
+    'body { background: #1a1208 !important; color: #fef3c7 !important; }',
+    'html { background: #1a1208; }',
+    // Consent page's "left strip" header column (md:bg-slate-100
+    // md:dark:bg-slate-800) — paint it a shade lighter than body so
+    // it reads as a distinct surface, matching the demo's own cards.
+    '.md\\:bg-slate-100, .md\\:dark\\:bg-slate-800 { background-color: #2d2010 !important; }',
+    '.md\\:dark\\:border-slate-700 { border-color: #4a3520 !important; }',
+    // Three-tone text hierarchy on the consent page. Provider-UI uses
+    // `text-slate-{100,200,300,400}` + `text-neutral-{400,500}` for
+    // primary / muted / hint text; remap to the theme's three shades.
+    '.text-slate-900, .dark\\:text-slate-100, .text-slate-800, .dark\\:text-slate-200, .text-gray-800, .dark\\:text-gray-200 { color: #fef3c7 !important; }',
+    '.text-slate-700, .text-slate-600, .dark\\:text-slate-300, .dark\\:text-slate-400 { color: #d4a574 !important; }',
+    '.text-slate-500, .text-gray-500, .text-neutral-500, .dark\\:text-neutral-400, .dark\\:text-gray-300, .dark\\:text-gray-400 { color: #a07848 !important; }',
+    // Consent page secondary buttons (Deny access etc.) default to
+    // .bg-gray-300 / .dark:bg-slate-600, which reads as a jarring
+    // slate-grey against the themed card. Tint them to a muted surface
+    // that harmonises with the palette.
+    '.bg-gray-300, .dark\\:bg-slate-600, .bg-gray-200, .dark\\:bg-gray-800, .dark\\:bg-gray-700 { background-color: #4a3520 !important; color: #fef3c7 !important; }',
     // auth-service hand-rolled markup
     '.container { background: #2d2010; box-shadow: 0 2px 12px rgba(0,0,0,0.4); }',
     'h1 { color: #fef3c7; }',
