@@ -37,6 +37,6 @@ export function makeSafeFetch(options: SafeFetchOptions = {}) {
     url: string,
     init?: RequestInit,
   ): Promise<Response> {
-    return wrappedFetch(url, { redirect: 'error', ...init })
+    return wrappedFetch(url, { ...init, redirect: 'error' })
   }
 }
