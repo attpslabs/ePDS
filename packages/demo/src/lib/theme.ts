@@ -8,6 +8,19 @@
  *     which the auth-service and pds-core CSS middleware inject into
  *     login / consent / choose-handle / recovery pages
  *
+ * The injected CSS must target TWO distinct markups on a single string:
+ *   1. auth-service's hand-rolled login / OTP / handle-chooser / recovery
+ *      pages, which use semantic class names (.container, .btn-primary,
+ *      .field, …).
+ *   2. @atproto/oauth-provider-ui's consent page, which is a Tailwind-
+ *      utility build and consumes colors via CSS custom properties
+ *      (`--branding-color-primary` etc., space-separated RGB channels
+ *      consumed by `rgb(var(--…))` / `bg-primary` / `text-primary`).
+ *
+ * Overriding the `--branding-color-*` vars at `:root` is the leverage
+ * point: one declaration recolours every `bg-primary`, `text-primary`,
+ * `border-primary` utility on the consent page simultaneously.
+ *
  * When `EPDS_CLIENT_THEME` is unset, `getTheme()` returns `null` and
  * callers fall back to their existing defaults (the light look the
  * untrusted demo uses).
@@ -71,7 +84,17 @@ const ocean: Theme = {
     logoBg: '#8b5cf6',
   },
   injectedCss: [
-    'body { background: #1a1033; color: #e8e0f0; }',
+    // Provider-UI consent page: recolour Tailwind utilities via the
+    // --branding-color-* custom props the UI reads through
+    // `rgb(var(--branding-color-primary))`. Channels are space-separated.
+    ':root { --branding-color-primary: 139 92 246; --branding-color-primary-contrast: 26 16 51; }',
+    // Background: auth-service pages use <body>, provider-UI puts its
+    // dark-mode body bg on <html class="dark">. Colour both.
+    'body, html { background: #1a1033; color: #e8e0f0; }',
+    // Provider-UI form card (.bg-white / .dark\\:bg-slate-800) and its
+    // dark-mode borders — keep card visibly distinct from page bg.
+    '.bg-white, [class*="dark:bg-slate"] { background: #251845 !important; }',
+    // auth-service hand-rolled markup
     '.container { background: #251845; box-shadow: 0 2px 12px rgba(0,0,0,0.4); }',
     'h1 { color: #e8e0f0; }',
     '.subtitle { color: #a78bbd; }',
@@ -120,7 +143,17 @@ const amber: Theme = {
     logoBg: '#f59e0b',
   },
   injectedCss: [
-    'body { background: #1a1208; color: #fef3c7; }',
+    // Provider-UI consent page: recolour Tailwind utilities via the
+    // --branding-color-* custom props the UI reads through
+    // `rgb(var(--branding-color-primary))`. Channels are space-separated.
+    ':root { --branding-color-primary: 245 158 11; --branding-color-primary-contrast: 26 18 8; }',
+    // Background: auth-service pages use <body>, provider-UI puts its
+    // dark-mode body bg on <html class="dark">. Colour both.
+    'body, html { background: #1a1208; color: #fef3c7; }',
+    // Provider-UI form card (.bg-white / .dark\\:bg-slate-800) and its
+    // dark-mode borders — keep card visibly distinct from page bg.
+    '.bg-white, [class*="dark:bg-slate"] { background: #2d2010 !important; }',
+    // auth-service hand-rolled markup
     '.container { background: #2d2010; box-shadow: 0 2px 12px rgba(0,0,0,0.4); }',
     'h1 { color: #fef3c7; }',
     '.subtitle { color: #d4a574; }',
