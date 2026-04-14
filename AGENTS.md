@@ -310,10 +310,16 @@ import { AuthServiceContext } from './context.js'
 ## Releases & Changesets
 
 ePDS uses [Changesets](https://github.com/changesets/changesets) for versioning
-and release notes. The repo is treated as a **single release unit** even though
-the source is split across `packages/*`, via a `"workspaces": ["."]` field in
-the root `package.json` that scopes Changesets to the root `ePDS` package only.
-One `CHANGELOG.md` at the repo root, one `v<version>` git tag per release, one
+and release notes. `CHANGELOG.md` is **prepend-only** — the tooling adds new
+sections at the top and never modifies old ones. See
+[`.agents/reference/release-notes.md`](.agents/reference/release-notes.md) for
+how the release workflow operates and how to fix attribution on Version Packages
+PRs.
+
+The repo is treated as a **single release unit** even though the source is split
+across `packages/*`, via a `"workspaces": ["."]` field in the root
+`package.json` that scopes Changesets to the root `ePDS` package only. One
+`CHANGELOG.md` at the repo root, one `v<version>` git tag per release, one
 GitHub Release per release.
 
 - **When to add a changeset:** any user-facing or operator-facing change to the
