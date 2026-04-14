@@ -44,7 +44,7 @@ function defaultSafeFetch() {
 
 describe('makeSafeFetch — URL validation', () => {
   it.each([
-    ['http://', 'http://example.com/data.json', /only https/i],
+    ['http://', 'http://example.com/data.json', /only https/i], // NOSONAR — testing SSRF guard
     ['file://', 'file:///etc/passwd', /only https/i],
     ['data: URI', 'data:text/plain,hello', /only https/i],
     ['malformed URL', 'not-a-url', /invalid url/i],
@@ -72,20 +72,20 @@ describe('makeSafeFetch — URL validation', () => {
 
 describe('makeSafeFetch — IP literal blocking', () => {
   it.each([
-    ['loopback IPv4 (127.0.0.1)', 'https://127.0.0.1/client-metadata.json'],
-    ['private 10.x.x.x', 'https://10.0.0.1/client-metadata.json'],
-    ['private 172.16.x.x', 'https://172.16.0.1/client-metadata.json'],
-    ['private 192.168.x.x', 'https://192.168.1.1/client-metadata.json'],
+    ['loopback IPv4 (127.0.0.1)', 'https://127.0.0.1/client-metadata.json'], // NOSONAR — testing SSRF guard
+    ['private 10.x.x.x', 'https://10.0.0.1/client-metadata.json'], // NOSONAR — testing SSRF guard
+    ['private 172.16.x.x', 'https://172.16.0.1/client-metadata.json'], // NOSONAR — testing SSRF guard
+    ['private 192.168.x.x', 'https://192.168.1.1/client-metadata.json'], // NOSONAR — testing SSRF guard
     [
       'link-local / cloud metadata',
-      'https://169.254.169.254/latest/meta-data/',
+      'https://169.254.169.254/latest/meta-data/', // NOSONAR — testing SSRF guard
     ],
-    ['IPv6 loopback ([::1])', 'https://[::1]/client-metadata.json'],
-    ['IPv6 unique-local ([fc00::1])', 'https://[fc00::1]/client-metadata.json'],
-    ['IPv6 link-local ([fe80::1])', 'https://[fe80::1]/client-metadata.json'],
+    ['IPv6 loopback ([::1])', 'https://[::1]/client-metadata.json'], // NOSONAR
+    ['IPv6 unique-local ([fc00::1])', 'https://[fc00::1]/client-metadata.json'], // NOSONAR
+    ['IPv6 link-local ([fe80::1])', 'https://[fe80::1]/client-metadata.json'], // NOSONAR
     [
       'IPv4-mapped IPv6 ([::ffff:192.168.1.1])',
-      'https://[::ffff:192.168.1.1]/client-metadata.json',
+      'https://[::ffff:192.168.1.1]/client-metadata.json', // NOSONAR
     ],
   ])('throws for %s', async (_label, url) => {
     const safeFetch = defaultSafeFetch()
@@ -96,7 +96,7 @@ describe('makeSafeFetch — IP literal blocking', () => {
     const mock = mockFetchOk()
     const safeFetch = defaultSafeFetch()
     await expect(
-      safeFetch('https://192.168.1.1/client-metadata.json'),
+      safeFetch('https://192.168.1.1/client-metadata.json'), // NOSONAR
     ).rejects.toThrow()
     expect(mock).not.toHaveBeenCalled()
   })
