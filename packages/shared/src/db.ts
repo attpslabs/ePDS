@@ -39,6 +39,7 @@ export interface ApiClientRow {
   apiKeyHash: string
   allowedOrigins: string | null
   canSignup: number
+  canCreateDirectly: number
   rateLimitPerHour: number
   createdAt: number
   revokedAt: number | null
@@ -327,6 +328,26 @@ export class EpdsDb {
       // tolerates a stuck schema_version or a fresh table). This entry exists
       // only to advance the version counter cleanly.
       () => {},
+
+      // v13: Per-client permission to create accounts directly (no OTP).
+      // Defaults to 0 — only explicitly-granted keys may use
+      // POST /_internal/account/create. Used by service callers that
+      // provision accounts server-to-server (e.g. community accounts).
+      //
+      // Idempotent: this column was originally added as v11 on an earlier
+      // branch, so it already exists on some persistent volumes (it would
+      // crash the bare ALTER with "duplicate column name"). Guard on
+      // PRAGMA table_info the same way the v12 Mastodon backstop does.
+      () => {
+        const cols = this.db
+          .prepare(`PRAGMA table_info(api_clients)`)
+          .all() as Array<{ name: string }>
+        if (!cols.some((c) => c.name === 'can_create_directly')) {
+          this.db.exec(
+            `ALTER TABLE api_clients ADD COLUMN can_create_directly INTEGER DEFAULT 0;`,
+          )
+        }
+      },
     ]
 
     for (let i = currentVersion; i < migrations.length; i++) {
@@ -701,12 +722,13 @@ export class EpdsDb {
     apiKeyHash: string
     allowedOrigins: string | null
     canSignup: boolean
+    canCreateDirectly?: boolean
     rateLimitPerHour: number
   }): void {
     this.db
       .prepare(
-        `INSERT INTO api_clients (id, name, client_id, api_key_hash, allowed_origins, can_signup, rate_limit_per_hour, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO api_clients (id, name, client_id, api_key_hash, allowed_origins, can_signup, can_create_directly, rate_limit_per_hour, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         data.id,
@@ -715,6 +737,7 @@ export class EpdsDb {
         data.apiKeyHash,
         data.allowedOrigins,
         data.canSignup ? 1 : 0,
+        data.canCreateDirectly ? 1 : 0,
         data.rateLimitPerHour,
         Date.now(),
       )
@@ -726,6 +749,7 @@ export class EpdsDb {
         `SELECT
         id, name, client_id as clientId, api_key_hash as apiKeyHash,
         allowed_origins as allowedOrigins, can_signup as canSignup,
+        can_create_directly as canCreateDirectly,
         rate_limit_per_hour as rateLimitPerHour, created_at as createdAt,
         revoked_at as revokedAt, last_used_at as lastUsedAt
        FROM api_clients WHERE api_key_hash = ? AND revoked_at IS NULL`,
