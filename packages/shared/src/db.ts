@@ -82,6 +82,10 @@ export interface MastodonVerifiedRow {
   providerAccount: string
   /** Synthetic or resolved email used for account creation. */
   email: string
+  /** Mastodon profile fields captured at verify time, for import on signup. */
+  displayName: string | null
+  bio: string | null
+  avatarUrl: string | null
   createdAt: number
   expiresAt: number
 }
@@ -315,6 +319,14 @@ export class EpdsDb {
           CREATE INDEX IF NOT EXISTS idx_ca_did ON connected_account(did);
         `)
       },
+
+      // v12: Capture Mastodon profile fields on the verified row so a new
+      // signup can import display name / bio / avatar into me.linkna.profile.
+      // No-op here: the column adds are handled idempotently by the
+      // ensureMastodonTables() backstop (which checks PRAGMA table_info and
+      // tolerates a stuck schema_version or a fresh table). This entry exists
+      // only to advance the version counter cleanly.
+      () => {},
     ]
 
     for (let i = currentVersion; i < migrations.length; i++) {
@@ -359,6 +371,9 @@ export class EpdsDb {
         instance         TEXT NOT NULL,
         provider_account TEXT NOT NULL,
         email            TEXT NOT NULL,
+        display_name     TEXT,
+        bio              TEXT,
+        avatar_url       TEXT,
         created_at       INTEGER NOT NULL,
         expires_at       INTEGER NOT NULL
       );
@@ -375,6 +390,20 @@ export class EpdsDb {
       );
       CREATE INDEX IF NOT EXISTS idx_ca_did ON connected_account(did);
     `)
+
+    // v12 backstop: ensure the profile-import columns exist on
+    // mastodon_verified even if the versioned ALTER was skipped (stuck
+    // schema_version) or the table was created fresh above without them.
+    const cols = this.db
+      .prepare(`PRAGMA table_info(mastodon_verified)`)
+      .all() as Array<{ name: string }>
+    const names = new Set(cols.map((c) => c.name))
+    if (!names.has('display_name'))
+      this.db.exec(`ALTER TABLE mastodon_verified ADD COLUMN display_name TEXT`)
+    if (!names.has('bio'))
+      this.db.exec(`ALTER TABLE mastodon_verified ADD COLUMN bio TEXT`)
+    if (!names.has('avatar_url'))
+      this.db.exec(`ALTER TABLE mastodon_verified ADD COLUMN avatar_url TEXT`)
   }
 
   // ── Verification Token Operations ──
@@ -820,19 +849,25 @@ export class EpdsDb {
     instance: string
     providerAccount: string
     email: string
+    displayName?: string | null
+    bio?: string | null
+    avatarUrl?: string | null
     expiresAt: number
   }): void {
     this.db
       .prepare(
         `INSERT INTO mastodon_verified
-         (verified_token, instance, provider_account, email, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         (verified_token, instance, provider_account, email, display_name, bio, avatar_url, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         data.verifiedToken,
         data.instance,
         data.providerAccount,
         data.email,
+        data.displayName ?? null,
+        data.bio ?? null,
+        data.avatarUrl ?? null,
         Date.now(),
         data.expiresAt,
       )
@@ -843,6 +878,7 @@ export class EpdsDb {
       .prepare(
         `SELECT verified_token as verifiedToken, instance,
          provider_account as providerAccount, email,
+         display_name as displayName, bio, avatar_url as avatarUrl,
          created_at as createdAt, expires_at as expiresAt
          FROM mastodon_verified WHERE verified_token = ? AND expires_at > ?`,
       )

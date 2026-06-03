@@ -147,6 +147,37 @@ describe('Mastodon verified (handle-pending) tokens', () => {
     db.deleteMastodonVerified('vt-1')
     expect(db.getMastodonVerified('vt-1')).toBeUndefined()
   })
+
+  it('round-trips imported Mastodon profile fields', () => {
+    db.createMastodonVerified({
+      verifiedToken: 'vt-profile',
+      instance: 'mastodon.social',
+      providerAccount: 'alice@mastodon.social',
+      email: 'mastodon-9@mastodon.social.mastodon.invalid',
+      displayName: 'Alice 🌸',
+      bio: '<p>builder &amp; coffee</p>',
+      avatarUrl: 'https://mastodon.social/avatars/alice.png',
+      expiresAt: Date.now() + 60_000,
+    })
+    const row = db.getMastodonVerified('vt-profile')
+    expect(row?.displayName).toBe('Alice 🌸')
+    expect(row?.bio).toBe('<p>builder &amp; coffee</p>')
+    expect(row?.avatarUrl).toBe('https://mastodon.social/avatars/alice.png')
+  })
+
+  it('defaults profile fields to null when omitted', () => {
+    db.createMastodonVerified({
+      verifiedToken: 'vt-noprofile',
+      instance: 'mastodon.social',
+      providerAccount: 'bob@mastodon.social',
+      email: 'mastodon-10@mastodon.social.mastodon.invalid',
+      expiresAt: Date.now() + 60_000,
+    })
+    const row = db.getMastodonVerified('vt-noprofile')
+    expect(row?.displayName).toBeNull()
+    expect(row?.bio).toBeNull()
+    expect(row?.avatarUrl).toBeNull()
+  })
 })
 
 describe('Connected account links', () => {

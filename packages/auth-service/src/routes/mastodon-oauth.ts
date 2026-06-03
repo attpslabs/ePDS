@@ -316,13 +316,29 @@ export function createMastodonOauthRouter(ctx: AuthServiceContext): Router {
         res.status(400).json({ error: 'Could not verify your Mastodon account' })
         return
       }
-      const me = (await meRes.json()) as { id?: string; username?: string; acct?: string }
+      const me = (await meRes.json()) as {
+        id?: string
+        username?: string
+        acct?: string
+        display_name?: string
+        note?: string
+        avatar?: string
+        avatar_static?: string
+      }
       const username = (me.username || me.acct || '').split('@')[0].toLowerCase()
       if (!me.id || !username) {
         res.status(400).json({ error: 'Mastodon returned an incomplete profile' })
         return
       }
       const providerAccount = `${username}@${flow.instance}`
+
+      // Mastodon profile fields to import into me.linkna.profile on signup.
+      // `note` is HTML; linkname strips it. avatar_static avoids animated GIFs.
+      const mastodonProfile = {
+        displayName: me.display_name || null,
+        bio: me.note || null,
+        avatarUrl: me.avatar_static || me.avatar || null,
+      }
 
       const pdsUrl = getPdsUrl()
       const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
@@ -352,18 +368,24 @@ export function createMastodonOauthRouter(ctx: AuthServiceContext): Router {
           providerAccount,
           providerEmail: null,
         })
-        res.status(201).json(result)
+        // Hand the captured profile to the client so it can import it into
+        // me.linkna.profile while the fresh accessJwt is valid.
+        res.status(201).json({ ...result, mastodonProfile })
         return
       }
 
-      // New user, login path: stash the verified identity and ask the client
-      // for a handle. code/state are spent, so the chooser submits this token.
+      // New user, login path: stash the verified identity (and profile) and
+      // ask the client for a handle. code/state are spent, so the chooser
+      // submits this token.
       const verifiedToken = randomBytes(32).toString('base64url')
       ctx.db.createMastodonVerified({
         verifiedToken,
         instance: flow.instance,
         providerAccount,
         email,
+        displayName: mastodonProfile.displayName,
+        bio: mastodonProfile.bio,
+        avatarUrl: mastodonProfile.avatarUrl,
         expiresAt: Date.now() + VERIFIED_TTL_MS,
       })
       res.json({
@@ -410,7 +432,16 @@ export function createMastodonOauthRouter(ctx: AuthServiceContext): Router {
         providerAccount: verified.providerAccount,
         providerEmail: null,
       })
-      res.status(201).json(result)
+      // Return the captured profile so the client can import it while the
+      // fresh accessJwt is valid.
+      res.status(201).json({
+        ...result,
+        mastodonProfile: {
+          displayName: verified.displayName,
+          bio: verified.bio,
+          avatarUrl: verified.avatarUrl,
+        },
+      })
     } catch (err) {
       logger.error({ err }, 'Mastodon complete (signup) failed')
       const message = err instanceof Error ? err.message : 'Account creation failed'
