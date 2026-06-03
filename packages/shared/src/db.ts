@@ -55,6 +55,46 @@ export interface AuthFlowRow {
   expiresAt: number
 }
 
+export interface MastodonAppRow {
+  instance: string
+  clientId: string
+  clientSecret: string
+  createdAt: number
+}
+
+export interface MastodonOauthFlowRow {
+  state: string
+  instance: string
+  tokenEndpoint: string
+  codeVerifier: string
+  redirectUri: string
+  /** Forced self.surf handle for the AAA claim path (null on the normal login path). */
+  claimHandle: string | null
+  createdAt: number
+  expiresAt: number
+}
+
+export interface MastodonVerifiedRow {
+  /** Opaque single-use token returned to the client when a new user must pick a handle. */
+  verifiedToken: string
+  instance: string
+  /** Canonical `username@instance`. */
+  providerAccount: string
+  /** Synthetic or resolved email used for account creation. */
+  email: string
+  createdAt: number
+  expiresAt: number
+}
+
+export interface ConnectedAccountRow {
+  id: string
+  did: string
+  provider: string
+  providerAccount: string
+  providerEmail: string | null
+  createdAt: number
+}
+
 export class EpdsDb {
   private db: Database.Database
 
@@ -225,6 +265,54 @@ export class EpdsDb {
             timestamp INTEGER NOT NULL
           );
           CREATE INDEX IF NOT EXISTS idx_acu_client_time ON api_client_usage(client_id, timestamp);
+        `)
+      },
+
+      // v11: Mastodon "Sign in with Mastodon" OAuth support.
+      // Additive only — new tables for per-instance app credential caching,
+      // short-lived OAuth flow/PKCE state, post-verification handle-chooser
+      // tokens, and links from a verified Mastodon identity to a self.surf DID.
+      () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS mastodon_app (
+            instance      TEXT PRIMARY KEY,
+            client_id     TEXT NOT NULL,
+            client_secret TEXT NOT NULL,
+            created_at    INTEGER NOT NULL
+          );
+
+          CREATE TABLE IF NOT EXISTS mastodon_oauth_flow (
+            state          TEXT PRIMARY KEY,
+            instance       TEXT NOT NULL,
+            token_endpoint TEXT NOT NULL,
+            code_verifier  TEXT NOT NULL,
+            redirect_uri   TEXT NOT NULL,
+            claim_handle   TEXT,
+            created_at     INTEGER NOT NULL,
+            expires_at     INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_mof_expires ON mastodon_oauth_flow(expires_at);
+
+          CREATE TABLE IF NOT EXISTS mastodon_verified (
+            verified_token   TEXT PRIMARY KEY,
+            instance         TEXT NOT NULL,
+            provider_account TEXT NOT NULL,
+            email            TEXT NOT NULL,
+            created_at       INTEGER NOT NULL,
+            expires_at       INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_mv_expires ON mastodon_verified(expires_at);
+
+          CREATE TABLE IF NOT EXISTS connected_account (
+            id               TEXT PRIMARY KEY,
+            did              TEXT NOT NULL,
+            provider         TEXT NOT NULL,
+            provider_account TEXT NOT NULL,
+            provider_email   TEXT,
+            created_at       INTEGER NOT NULL,
+            UNIQUE(provider, provider_account)
+          );
+          CREATE INDEX IF NOT EXISTS idx_ca_did ON connected_account(did);
         `)
       },
     ]
@@ -597,6 +685,177 @@ export class EpdsDb {
       .prepare(`DELETE FROM api_client_usage WHERE timestamp < ?`)
       .run(oneDayAgo)
     return result.changes
+  }
+
+  // ── Mastodon OAuth Operations ──
+  // Per-instance app credentials, short-lived OAuth/PKCE flow state,
+  // post-verification handle-chooser tokens, and connected-account links.
+
+  /** Cached OAuth client app credentials for a Mastodon instance (registered once per instance). */
+  getMastodonApp(instance: string): MastodonAppRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT instance, client_id as clientId, client_secret as clientSecret,
+         created_at as createdAt FROM mastodon_app WHERE instance = ?`,
+      )
+      .get(instance) as MastodonAppRow | undefined
+  }
+
+  upsertMastodonApp(
+    instance: string,
+    clientId: string,
+    clientSecret: string,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO mastodon_app (instance, client_id, client_secret, created_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(instance) DO UPDATE SET client_id = excluded.client_id,
+           client_secret = excluded.client_secret, created_at = excluded.created_at`,
+      )
+      .run(instance, clientId, clientSecret, Date.now())
+  }
+
+  createMastodonOauthFlow(data: {
+    state: string
+    instance: string
+    tokenEndpoint: string
+    codeVerifier: string
+    redirectUri: string
+    claimHandle?: string | null
+    expiresAt: number
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO mastodon_oauth_flow
+         (state, instance, token_endpoint, code_verifier, redirect_uri, claim_handle, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        data.state,
+        data.instance,
+        data.tokenEndpoint,
+        data.codeVerifier,
+        data.redirectUri,
+        data.claimHandle ?? null,
+        Date.now(),
+        data.expiresAt,
+      )
+  }
+
+  getMastodonOauthFlow(state: string): MastodonOauthFlowRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT state, instance, token_endpoint as tokenEndpoint,
+         code_verifier as codeVerifier, redirect_uri as redirectUri,
+         claim_handle as claimHandle, created_at as createdAt, expires_at as expiresAt
+         FROM mastodon_oauth_flow WHERE state = ? AND expires_at > ?`,
+      )
+      .get(state, Date.now()) as MastodonOauthFlowRow | undefined
+  }
+
+  deleteMastodonOauthFlow(state: string): void {
+    this.db
+      .prepare(`DELETE FROM mastodon_oauth_flow WHERE state = ?`)
+      .run(state)
+  }
+
+  /** Persist a verified-but-handle-pending identity, returned to the client as a single-use token. */
+  createMastodonVerified(data: {
+    verifiedToken: string
+    instance: string
+    providerAccount: string
+    email: string
+    expiresAt: number
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO mastodon_verified
+         (verified_token, instance, provider_account, email, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        data.verifiedToken,
+        data.instance,
+        data.providerAccount,
+        data.email,
+        Date.now(),
+        data.expiresAt,
+      )
+  }
+
+  getMastodonVerified(verifiedToken: string): MastodonVerifiedRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT verified_token as verifiedToken, instance,
+         provider_account as providerAccount, email,
+         created_at as createdAt, expires_at as expiresAt
+         FROM mastodon_verified WHERE verified_token = ? AND expires_at > ?`,
+      )
+      .get(verifiedToken, Date.now()) as MastodonVerifiedRow | undefined
+  }
+
+  deleteMastodonVerified(verifiedToken: string): void {
+    this.db
+      .prepare(`DELETE FROM mastodon_verified WHERE verified_token = ?`)
+      .run(verifiedToken)
+  }
+
+  cleanupExpiredMastodonFlows(): number {
+    const now = Date.now()
+    const a = this.db
+      .prepare(`DELETE FROM mastodon_oauth_flow WHERE expires_at < ?`)
+      .run(now)
+    const b = this.db
+      .prepare(`DELETE FROM mastodon_verified WHERE expires_at < ?`)
+      .run(now)
+    return a.changes + b.changes
+  }
+
+  /** Resolve a verified third-party identity to a linked self.surf DID, if any. */
+  getDidByConnectedAccount(
+    provider: string,
+    providerAccount: string,
+  ): string | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT did FROM connected_account WHERE provider = ? AND provider_account = ?`,
+      )
+      .get(provider, providerAccount) as { did: string } | undefined
+    return row?.did
+  }
+
+  addConnectedAccount(data: {
+    id: string
+    did: string
+    provider: string
+    providerAccount: string
+    providerEmail?: string | null
+  }): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO connected_account
+         (id, did, provider, provider_account, provider_email, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        data.id,
+        data.did,
+        data.provider,
+        data.providerAccount,
+        data.providerEmail ?? null,
+        Date.now(),
+      )
+  }
+
+  getConnectedAccounts(did: string): ConnectedAccountRow[] {
+    return this.db
+      .prepare(
+        `SELECT id, did, provider, provider_account as providerAccount,
+         provider_email as providerEmail, created_at as createdAt
+         FROM connected_account WHERE did = ?`,
+      )
+      .all(did) as ConnectedAccountRow[]
   }
 
   // ── Metrics ──
