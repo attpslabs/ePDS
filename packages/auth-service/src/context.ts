@@ -71,6 +71,7 @@ export class AuthServiceContext {
         this.db.cleanupOldRateLimitEntries()
         this.db.cleanupOldOtpFailures()
         this.db.cleanupOldApiClientUsage()
+        this.db.cleanupExpiredMastodonFlows()
       },
       5 * 60 * 1000,
     )

@@ -5,6 +5,10 @@ export type {
   EmailRateLimitRow,
   AuthFlowRow,
   ApiClientRow,
+  MastodonAppRow,
+  MastodonOauthFlowRow,
+  MastodonVerifiedRow,
+  ConnectedAccountRow,
 } from './db.js'
 export {
   generateVerificationToken,

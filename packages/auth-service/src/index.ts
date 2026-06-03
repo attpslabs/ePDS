@@ -17,6 +17,7 @@ import { createCompleteRouter } from './routes/complete.js'
 import { createChooseHandleRouter } from './routes/choose-handle.js'
 import { createOtpByFlowRouter } from './routes/otp-by-flow.js'
 import { createHeadlessOtpRouter } from './routes/headless-otp.js'
+import { createMastodonOauthRouter } from './routes/mastodon-oauth.js'
 import { createHeartbeatRouter } from './routes/heartbeat.js'
 import { createPreviewEmailsRouter } from './routes/preview-emails.js'
 import { createRootRouter } from './routes/root.js'
@@ -58,6 +59,10 @@ export function createAuthService(config: AuthServiceConfig): {
   // rate-limit middleware — they are trusted server-to-server calls
   // authenticated via x-internal-secret, not browser requests.
   app.use(createHeadlessOtpRouter(ctx, betterAuthInstance))
+
+  // Mastodon "Sign in with Mastodon" OAuth endpoints (/_internal/mastodon/*).
+  // Same trusted server-to-server class as the headless OTP routes.
+  app.use(createMastodonOauthRouter(ctx))
 
   app.use('/static', express.static(path.resolve(__dirname, '..', 'public')))
 
