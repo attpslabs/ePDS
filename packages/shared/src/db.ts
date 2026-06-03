@@ -321,6 +321,60 @@ export class EpdsDb {
       migrations[i]()
       this.db.prepare('UPDATE schema_version SET version = ?').run(i + 1)
     }
+
+    // Defensive, idempotent backstop for the v11 Mastodon tables. The
+    // versioned loop above already creates them on a clean upgrade, but if a
+    // DB's schema_version was advanced past 11 without the tables landing
+    // (e.g. a partial/stale prior deploy on a persistent volume), the gated
+    // migration is skipped forever and the tables never appear. These
+    // CREATE ... IF NOT EXISTS statements are cheap and safe to run on every
+    // startup, and self-heal such a DB without a destructive reset.
+    this.ensureMastodonTables()
+  }
+
+  /** Idempotently ensure the v11 Mastodon OAuth tables exist. See migrate(). */
+  private ensureMastodonTables(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS mastodon_app (
+        instance      TEXT PRIMARY KEY,
+        client_id     TEXT NOT NULL,
+        client_secret TEXT NOT NULL,
+        created_at    INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS mastodon_oauth_flow (
+        state          TEXT PRIMARY KEY,
+        instance       TEXT NOT NULL,
+        token_endpoint TEXT NOT NULL,
+        code_verifier  TEXT NOT NULL,
+        redirect_uri   TEXT NOT NULL,
+        claim_handle   TEXT,
+        created_at     INTEGER NOT NULL,
+        expires_at     INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_mof_expires ON mastodon_oauth_flow(expires_at);
+
+      CREATE TABLE IF NOT EXISTS mastodon_verified (
+        verified_token   TEXT PRIMARY KEY,
+        instance         TEXT NOT NULL,
+        provider_account TEXT NOT NULL,
+        email            TEXT NOT NULL,
+        created_at       INTEGER NOT NULL,
+        expires_at       INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_mv_expires ON mastodon_verified(expires_at);
+
+      CREATE TABLE IF NOT EXISTS connected_account (
+        id               TEXT PRIMARY KEY,
+        did              TEXT NOT NULL,
+        provider         TEXT NOT NULL,
+        provider_account TEXT NOT NULL,
+        provider_email   TEXT,
+        created_at       INTEGER NOT NULL,
+        UNIQUE(provider, provider_account)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ca_did ON connected_account(did);
+    `)
   }
 
   // ── Verification Token Operations ──

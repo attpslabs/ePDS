@@ -32,6 +32,27 @@ afterEach(() => {
   } catch {}
 })
 
+describe('Mastodon table self-heal backstop', () => {
+  it('creates the v11 tables even when schema_version was advanced past 11 without them', () => {
+    // Simulate a DB whose version counter reached 11 but the tables never
+    // landed (stale/partial prior deploy on a persistent volume).
+    db.close()
+    const raw = new (require('better-sqlite3'))(dbPath)
+    raw.exec('DROP TABLE IF EXISTS mastodon_app')
+    raw.exec('DROP TABLE IF EXISTS mastodon_oauth_flow')
+    raw.exec('DROP TABLE IF EXISTS mastodon_verified')
+    raw.exec('DROP TABLE IF EXISTS connected_account')
+    raw.prepare('UPDATE schema_version SET version = ?').run(11)
+    raw.close()
+
+    // Reopening via EpdsDb must self-heal the missing tables.
+    db = new EpdsDb(dbPath)
+    expect(db.getMastodonApp('mastodon.social')).toBeUndefined() // no throw = table exists
+    db.upsertMastodonApp('mastodon.social', 'cid', 'secret')
+    expect(db.getMastodonApp('mastodon.social')?.clientId).toBe('cid')
+  })
+})
+
 describe('Mastodon app credential cache', () => {
   it('returns undefined for an unknown instance', () => {
     expect(db.getMastodonApp('mastodon.social')).toBeUndefined()
